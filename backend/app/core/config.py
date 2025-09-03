@@ -8,6 +8,7 @@ class Settings:
     MINIO_ACCESS_KEY: str = "minioadmin"
     MINIO_SECRET_KEY: str = "minioadmin"
     MINIO_BUCKET: str = "secureshare"
+    PUBLIC_BASE_URL: str = "http://localhost:8000/"
     MAX_FILE_SIZE: int = 1024 * 1024 * 1024  # 1024MB
     ALLOWED_EXTENSIONS: set = {
             # Документы
