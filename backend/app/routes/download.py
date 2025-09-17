@@ -1,13 +1,11 @@
-
 from __future__ import annotations
 
 import html
 import math
 import urllib.parse
+from collections.abc import AsyncIterator
 from datetime import datetime
-from typing import AsyncIterator, Optional
 
-import anyio
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from sqlalchemy import select
@@ -23,16 +21,13 @@ from app.utils.urls import build_external_url
 router = APIRouter(tags=["Download"])
 
 
-# -----------------------------
-# Helpers
-# -----------------------------
-
 def _rfc5987_filename(value: str) -> str:
-    # Build a robust Content-Disposition filename / filename* pair
     quoted = urllib.parse.quote(value, safe="")
-    return f'filename="{value.encode("latin-1", "ignore").decode("latin-1")}"; filename*=UTF-8\'\'{quoted}'
+    latin1_fallback = value.encode("latin-1", "ignore").decode("latin-1")
+    return f'filename="{latin1_fallback}"; filename*=UTF-8\'\'{quoted}'
 
-def _human_size(n: int) -> str:
+
+def _human_size(n: int | None) -> str:
     if n is None:
         return "unknown"
     units = ["B", "KB", "MB", "GB", "TB"]
@@ -41,11 +36,11 @@ def _human_size(n: int) -> str:
     p = min(int(math.log(n, 1024)), len(units) - 1)
     return f"{n / (1024 ** p):.2f} {units[p]}"
 
+
 async def _aiter_minio(obj) -> AsyncIterator[bytes]:
     try:
-        # read in chunks via threadpool to avoid blocking loop
         while True:
-            chunk = await run_in_threadpool(obj.read, 1024 * 1024)  # 1 MiB
+            chunk = await run_in_threadpool(obj.read, 1024 * 1024)  
             if not chunk:
                 break
             yield chunk
@@ -53,36 +48,62 @@ async def _aiter_minio(obj) -> AsyncIterator[bytes]:
         await run_in_threadpool(obj.close)
 
 
-# -----------------------------
-# Public HTML landing page that auto-starts the download
-# -----------------------------
+def _render_error_page(title: str, message: str, status_code: int = 404) -> HTMLResponse:
+    esc = lambda s: html.escape(s or "", quote=True)
+    page = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>{esc(title)}</title>
+  <style>
+    :root{{ --bg:#0b1016; --card:#111827; --fg:#e5eef7; --muted:#8ea3b7; }}
+    html,body{{ height:100%; }}
+    body{{ margin:0; background:var(--bg); color:var(--fg); font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; }}
+    .wrap{{ min-height:100%; display:grid; place-items:center; padding:24px; }}
+    .card{{ background:var(--card); padding:28px; max-width:640px; border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,.35); }}
+    .title{{ margin:0 0 8px 0; font-size:22px; }}
+    .muted{{ color:var(--muted); margin:0; }}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1 class="title">{esc(title)}</h1>
+      <p class="muted">{esc(message)}</p>
+    </div>
+  </div>
+</body>
+</html>"""
+    return HTMLResponse(content=page, status_code=status_code, headers={"Cache-Control": "no-store"})
+
+
 
 @router.get("/s/{token}", response_class=HTMLResponse)
 async def share_landing(token: str, request: Request, db: AsyncSession = Depends(get_db)):
-    """Public landing page for a share token that auto-triggers the browser download.
+    """
+    Public landing page for a share token that auto-triggers the browser download.
     Shows basic metadata and provides a big 'Download' button as fallback.
     """
     now = datetime.utcnow()
 
     res = await db.execute(select(ShareLink).where(ShareLink.token == token))
-    link: Optional[ShareLink] = res.scalars().first()
+    link: ShareLink | None = res.scalars().first()
 
     if not link or not link.is_active or (link.expires_at and link.expires_at <= now):
-        raise HTTPException(status_code=404, detail="File not found")
+        return _render_error_page("Share link not found", "The link is invalid or has expired.", 404)
 
     res = await db.execute(select(File).where(File.id == link.file_id))
-    file: Optional[File] = res.scalars().first()
+    file: File | None = res.scalars().first()
+
     if not file:
         link.is_active = False
         await db.commit()
-        raise HTTPException(status_code=404, detail="File not found")
+        return _render_error_page("File not found", "The file has been removed or is no longer available.", 404)
 
     direct_url = build_external_url(request, f"/download/{token}")
     filename = file.filename or "download.bin"
-    safe_filename = html.escape(filename)
-
-    # NOTE: we do not increment views here; views are incremented in the actual /download/{token}
-    # to avoid double counting if a user refreshes this page without triggering the download.
+    safe_filename = html.escape(filename, quote=True)
 
     html_page = f"""<!doctype html>
 <html lang="en">
@@ -114,9 +135,8 @@ async def share_landing(token: str, request: Request, db: AsyncSession = Depends
       <p class="meta">Size: {_human_size(file.size)}{(' · expires: ' + link.expires_at.isoformat()) if link.expires_at else ''}</p>
 
       <div class="row">
-        <a id="dl" class="btn" href="{direct_url}" download="{html.escape(filename)}">Download</a>
+        <a id="dl" class="btn" href="{direct_url}" download="{safe_filename}">Download</a>
         <button class="btn secondary" id="copy">Copy link</button>
-        <a class="btn secondary" href="{direct_url}" target="_blank" rel="noopener">Open directly</a>
       </div>
 
       <p class="meta" id="status">The download should start automatically. If it doesn’t, click <strong>Download</strong>.</p>
@@ -133,9 +153,11 @@ async def share_landing(token: str, request: Request, db: AsyncSession = Depends
     // Copy link
     document.getElementById('copy').addEventListener('click', async () => {{
       const url = document.getElementById('hidden').value;
-      try {{ await navigator.clipboard.writeText(url); 
-        document.getElementById('status').textContent = 'Link copied to clipboard.'; }}
-      catch (e) {{
+      try {{
+        await navigator.clipboard.writeText(url);
+        document.getElementById('status').textContent = 'Link copied to clipboard.';
+      }} catch (e) {{
+        // Fallback: show the input so the user can copy manually
         document.getElementById('hidden').classList.remove('hidden');
         document.getElementById('hidden').select();
         document.getElementById('status').textContent = 'Press Ctrl+C to copy the link below.';
@@ -147,34 +169,28 @@ async def share_landing(token: str, request: Request, db: AsyncSession = Depends
     return HTMLResponse(html_page, headers={"Cache-Control": "no-store"})
 
 
-# -----------------------------
-# Direct file download by token (streams the object)
-# -----------------------------
-
 @router.get("/download/{token}")
 async def download_by_token(token: str, request: Request, db: AsyncSession = Depends(get_db)):
     now = datetime.utcnow()
 
     res = await db.execute(select(ShareLink).where(ShareLink.token == token))
-    link: Optional[ShareLink] = res.scalars().first()
+    link: ShareLink | None = res.scalars().first()
 
     if not link or not link.is_active or (link.expires_at and link.expires_at <= now):
         raise HTTPException(status_code=404, detail="File not found")
 
     res = await db.execute(select(File).where(File.id == link.file_id))
-    file: Optional[File] = res.scalars().first()
+    file: File | None = res.scalars().first()
     if not file:
         link.is_active = False
         await db.commit()
         raise HTTPException(status_code=404, detail="File not found")
 
-    # Increment usage counters before streaming
     link.views = (link.views or 0) + 1
     if link.max_views and link.views >= link.max_views:
         link.is_active = False
     await db.commit()
 
-    # Get object stat and open stream
     try:
         stat = await run_in_threadpool(minio_client.stat_object, file.bucket, file.object_name)
     except Exception:
@@ -185,8 +201,6 @@ async def download_by_token(token: str, request: Request, db: AsyncSession = Dep
     except Exception:
         raise HTTPException(status_code=500, detail="Storage is temporarily unavailable")
 
-    # Content-Disposition
-    # Allow overriding filename via ?filename=... (optional nicety)
     override = request.query_params.get("filename")
     effective_name = override or file.filename or "download.bin"
     content_disposition = f'attachment; {_rfc5987_filename(effective_name)}'
@@ -194,6 +208,7 @@ async def download_by_token(token: str, request: Request, db: AsyncSession = Dep
     headers = {
         "Content-Disposition": content_disposition,
         "Content-Length": str(getattr(stat, "size", "") or ""),
+        "Cache-Control": "no-store",
     }
 
     media_type = file.content_type or getattr(stat, "content_type", None) or "application/octet-stream"

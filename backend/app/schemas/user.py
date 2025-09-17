@@ -1,6 +1,6 @@
-from pydantic import BaseModel, EmailStr, constr
 from datetime import datetime
-from typing import Optional
+
+from pydantic import BaseModel, EmailStr, constr
 
 
 class UserCreate(BaseModel):
@@ -45,10 +45,10 @@ class UserResponse(BaseModel):
 
 # Дополнительные схемы, которые могут пригодиться
 class UserUpdate(BaseModel):
-    email: Optional[EmailStr] = None
-    password: Optional[str] = None
-    is_active: Optional[bool] = None
-    force_password_reset: Optional[bool] = None
+    email: EmailStr | None = None
+    password: str | None = None
+    is_active: bool | None = None
+    force_password_reset: bool | None = None
 
 class UserInDB(UserResponse):
     hashed_password: str

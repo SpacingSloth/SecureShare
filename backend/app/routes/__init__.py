@@ -1,8 +1,10 @@
-from .auth import router as auth
-from .files import router as files
-from .share_links import router as share_links
-from .users import router as users
 from .admin import router as admin
-from .ui import router as ui
-from .two_factor import router as two_factor
+from .auth import router as auth
 from .download import router as download
+from .files import router as files
+from .pages import router as pages
+from .share_links import router as share_links
+from .share_links import router_compat as share_links_compat
+from .two_factor import router as two_factor
+from .ui import router as ui
+from .users import router as users

@@ -8,8 +8,6 @@ router = APIRouter(tags=["UI"])
 
 @router.get("/ui", response_class=HTMLResponse)
 async def ui_home():
-    # Pure client-side UI that uses your existing API with a pasted/stored JWT token.
-    # No extra deps, works out of the box.
     html = """<!doctype html>
 <html lang="en">
 <head>

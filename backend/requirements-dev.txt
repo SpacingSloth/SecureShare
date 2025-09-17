@@ -1,0 +1,4 @@
+bandit==1.7.9
+ruff==0.6.9
+mypy==1.11.2
+pip-audit==2.7.3

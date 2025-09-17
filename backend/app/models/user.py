@@ -1,7 +1,10 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, Boolean
+
+from sqlalchemy import Boolean, Column, DateTime, String
+
 from app.core.database import Base
+
 
 class User(Base):
     __tablename__ = "users"

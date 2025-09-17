@@ -1,299 +1,218 @@
-/* Основные стили */
-.container {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 20px;
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
-  color: #e7edf3;
-  background-color: #0d1117;
-  min-height: 100vh;
+/* ========== БАЗОВОЕ ОФОРМЛЕНИЕ ========== */
+.container{
+  max-width:1200px;margin:0 auto;padding:20px;
+  font-family:'Inter',system-ui,-apple-system,sans-serif;
+  color:#e7edf3;background:#0d1117;min-height:100vh;
+}
+.auth-container{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;justify-content:center;min-height:100vh;}
+
+h1,h2,h3{color:#e7edf3;margin-bottom:1rem;}
+h1{font-size:2.5rem;text-align:center;margin-bottom:2rem;}
+
+/* ========== ФОРМЫ И КНОПКИ ========== */
+.auth-form{
+  background:#121821;padding:2rem;border-radius:12px;width:100%;max-width:400px;
+  box-shadow:0 4px 12px rgba(0,0,0,.15);
+}
+.form-input{
+  width:100%;padding:12px;margin-bottom:1rem;border:1px solid #334;border-radius:8px;
+  background:#0d1117;color:#e7edf3;font-size:1rem;
+}
+.form-input:focus{outline:none;border-color:#2a7cff;box-shadow:0 0 0 2px rgba(42,124,255,.2);}
+
+.btn-primary{
+  background:#2a7cff;color:#fff;border:none;padding:12px 16px;border-radius:8px;
+  cursor:pointer;font-size:1rem;transition:background .2s;
+}
+.btn-primary:hover{background:#1a6ce0;}
+.btn-primary:disabled{background:#3a4a60;cursor:not-allowed;}
+
+.btn-secondary{
+  background:#2b3340;color:#e7edf3;border:none;padding:12px 16px;border-radius:8px;
+  cursor:pointer;font-size:1rem;transition:background .2s;
+}
+.btn-secondary:hover{background:#3a4452;}
+
+.btn-link{
+  background:none;color:#9fc0ff;border:none;padding:12px 16px;cursor:pointer;text-decoration:underline;font-size:1rem;
+}
+.btn-link:hover{color:#7aaaff;}
+
+.auth-buttons{display:flex;flex-wrap:wrap;gap:.5rem;}
+
+/* ========== ШАПКА ========== */
+header{
+  display:flex;justify-content:space-between;align-items:center;
+  margin-bottom:2rem;padding-bottom:1rem;border-bottom:1px solid #334;
+}
+.header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;}
+nav{display:flex;gap:1rem;}
+nav a{
+  color:#9fc0ff;text-decoration:none;padding:.5rem 1rem;border-radius:6px;transition:background .2s;
+  font-size:1.35rem;font-weight:900; /* крупнее Files / Security */
+}
+nav a:hover{background:#1a2333;}
+
+/* ========== НАСТРОЙКИ ШАРИНГА ========== */
+.sharing-settings{background:#121821;padding:1.5rem;border-radius:12px;margin-bottom:1.5rem;}
+
+.settings-grid{
+  display:grid;grid-template-columns:repeat(2,minmax(250px,1fr));gap:1rem;align-items:start;
+}
+.setting-group{display:flex;flex-wrap:wrap;gap:.5rem;}
+.setting-group label{margin-bottom:.5rem;color:#a9b6c6;font-size:.9rem;}
+/* Раскладка трёх блоков: 1) Expiration (1-я колонка), 2) Download limit (2-я), 3) Reuse (под Download limit) */
+.settings-grid .setting-group:nth-child(1){grid-column:1;}
+.settings-grid .setting-group:nth-child(2){grid-column:2;}
+.settings-grid .setting-group:nth-child(3){grid-column:2;margin-top:.25rem;}
+
+.checkbox-label{display:flex;align-items:center;gap:.5rem;cursor:pointer;}
+.checkbox-label input[type="checkbox"]{width:auto;margin:0;}
+
+/* Кастомный тогглер (если используешь вместо checkbox) */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}
+.toggle{display:inline-flex;align-items:center;gap:.75rem;cursor:pointer;user-select:none;color:#a9b6c6;}
+.toggle-input{position:absolute;opacity:0;pointer-events:none;}
+.toggle-track{
+  position:relative;width:44px;height:26px;border-radius:999px;background:#2b3340;
+  box-shadow:inset 0 0 0 1px #334;transition:background .2s,box-shadow .2s;flex:0 0 auto;
+}
+.toggle-thumb{position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:999px;background:#e7edf3;transition:transform .2s;}
+.toggle-input:checked + .toggle-track{background:#2a7cff;box-shadow:none;}
+.toggle-input:checked + .toggle-track .toggle-thumb{transform:translateX(18px);}
+.toggle-input:focus-visible + .toggle-track{outline:2px solid rgba(42,124,255,.6);outline-offset:2px;}
+.toggle:hover .toggle-track{box-shadow:inset 0 0 0 1px #3a4452;}
+.toggle-text{line-height:1.2;}
+
+/* ========== ПОИСК + КНОПКИ (в один ряд) ========== */
+.search-and-filters{display:flex;flex-direction:column;gap:1rem;}
+.search-section{
+  display:grid;grid-template-columns:minmax(620px,1fr) auto auto;gap:.75rem;align-items:center;
+}
+.search-section .form-input,
+.search-section input[type="text"]{margin-bottom:0;}
+.search-section .btn-secondary,.search-section .btn-primary{margin:0;align-self:center;white-space:nowrap;}
+
+/* ========== ПАНЕЛЬ ФИЛЬТРОВ ========== */
+/* Чёткая сетка: 1) File Type, 2) Start Date, 3) End Date, 4) Items per page */
+.filters-panel{
+  display:grid;grid-template-columns:minmax(280px,1fr) minmax(280px,1fr);
+  gap:1rem 2rem;align-items:start;
+}
+.filters-panel .filter-group{display:flex;flex-direction:column;gap:.5rem;}
+.filters-panel .filter-group label{margin:0;}
+.filters-panel .filter-group:nth-child(1){grid-column:1;grid-row:1;} /* File Type */
+.filters-panel .filter-group:nth-child(2){grid-column:2;grid-row:1;} /* Start Date */
+.filters-panel .filter-group:nth-child(3){grid-column:2;grid-row:2;} /* End Date */
+.filters-panel .filter-group:nth-child(4){grid-column:1;grid-row:2;} /* Items per page */
+
+/* Единая высота полей + белые иконки календарей */
+.filters-panel .form-input,
+.filters-panel input[type="date"].form-input,
+.filters-panel select.form-input{height:44px;line-height:44px;}
+.filters-panel input[type="date"].form-input{padding-right:40px;color-scheme:dark;}
+.filters-panel input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(1) brightness(1.6);opacity:1;}
+
+/* ========== СПИСОК ФАЙЛОВ ========== */
+.file-list{
+  background:#121821;padding:1.5rem;border-radius:12px;
+  display:flex;flex-direction:column; /* чтобы футер растягивался на ширину карточки */
+}
+.no-files{color:#88a;text-align:center;padding:2rem;}
+.files-table{width:100%;border-collapse:collapse;}
+.files-table th,.files-table td{padding:12px;text-align:left;border-bottom:1px solid #334;}
+.files-table th{color:#a9b6c6;font-weight:600;}
+.files-table tr:hover{background:#1a2333;}
+
+.share-link{display:flex;gap:.5rem;align-items:center;}
+.share-link a{color:#2a7cff;text-decoration:none;}
+.share-link a:hover{text-decoration:underline;}
+.share-link button{background:transparent;color:#9fc0ff;border:none;cursor:pointer;padding:4px 8px;}
+.share-link button:hover{color:#7aaaff;}
+
+/* Карточки (например, .upload-section.card) */
+.card{background:#121821;padding:1rem;border-radius:12px;}
+
+/* Пагинация над таблицей (слева) */
+.pagination{
+  display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;justify-content:flex-start;margin:1rem 0;
+}
+.pagination .page-info,.pagination .total-info{color:#a9b6c6;font-size:.95rem;}
+
+/* Нижняя пагинация — по центру */
+.pagination-footer{
+  display:flex;align-items:center;justify-content:center;gap:.5rem;flex-wrap:wrap;width:100%;
+  margin-top:1rem;padding-top:1rem;border-top:1px solid #334;
+}
+.pagination-footer .page-info,.pagination-footer .total-info{color:#a9b6c6;font-size:.95rem;}
+
+/* ========== СООБЩЕНИЯ ========== */
+.message{padding:12px;border-radius:8px;margin-bottom:1rem;}
+.message-success{background:#d4edda;color:#155724;border:1px solid #c3e6cb;}
+.message-error{background:#f8d7da;color:#721c24;border:1px solid #f5c6cb;}
+
+/* ========== АДАПТИВНОСТЬ ========== */
+@media (max-width:768px){
+  .container{padding:1rem;}
+  header{flex-wrap:wrap;gap:1rem;align-items:flex-start;}
+  .settings-grid{grid-template-columns:1fr;}
+  .upload-section{flex-wrap:wrap;gap:.5rem;align-items:flex-start;}
+  .files-table{font-size:.9rem;}
+  .files-table th,.files-table td{padding:8px;}
+  .search-section{grid-template-columns:1fr;}
+  .filters-panel{grid-template-columns:1fr;}
+}
+@media (max-width:640px){
+  .auth-buttons{flex-direction:column;}
+  .pagination,.pagination-footer{justify-content:center;flex-direction:column;align-items:stretch;}
 }
 
-.auth-container {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-height: 100vh;
-}
+/* Fallback-отступы между элементами в блоке загрузки */
+.upload-section > * { margin: 0; }
+.upload-section > * + * { margin-left: 0.75rem; }  /* гарантирует зазор даже без flex-gap */
 
-/* Заголовки */
-h1, h2, h3 {
-  color: #e7edf3;
-  margin-bottom: 1rem;
-}
-
-h1 {
-  font-size: 2.5rem;
-  text-align: center;
-  margin-bottom: 2rem;
-}
-
-/* Формы */
-.auth-form {
-  background: #121821;
-  padding: 2rem;
-  border-radius: 12px;
-  width: 100%;
-  max-width: 400px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-
-.form-input {
-  width: 100%;
-  padding: 12px;
-  margin-bottom: 1rem;
-  border: 1px solid #334;
-  border-radius: 8px;
-  background: #0d1117;
-  color: #e7edf3;
-  font-size: 1rem;
-}
-
-.form-input:focus {
-  outline: none;
-  border-color: #2a7cff;
-  box-shadow: 0 0 0 2px rgba(42, 124, 255, 0.2);
-}
-
-/* Кнопки */
-.btn-primary {
-  background: #2a7cff;
-  color: white;
-  border: none;
-  padding: 12px 16px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 1rem;
-  transition: background 0.2s;
-}
-
-.btn-primary:hover {
-  background: #1a6ce0;
-}
-
-.btn-primary:disabled {
-  background: #3a4a60;
-  cursor: not-allowed;
-}
-
-.btn-secondary {
-  background: #2b3340;
-  color: #e7edf3;
-  border: none;
-  padding: 12px 16px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 1rem;
-  transition: background 0.2s;
-}
-
-.btn-secondary:hover {
-  background: #3a4452;
-}
-
-.btn-link {
-  background: none;
-  color: #9fc0ff;
-  border: none;
-  padding: 12px 16px;
-  cursor: pointer;
-  text-decoration: underline;
-  font-size: 1rem;
-}
-
-.btn-link:hover {
-  color: #7aaaff;
-}
-
-.auth-buttons {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-/* Шапка */
-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 2rem;
-  padding-bottom: 1rem;
-  border-bottom: 1px solid #334;
-}
-
-nav {
-  display: flex;
-  gap: 1rem;
-}
-
-nav a {
-  color: #9fc0ff;
-  text-decoration: none;
-  padding: 0.5rem 1rem;
-  border-radius: 6px;
-  transition: background 0.2s;
-}
-
-nav a:hover {
-  background: #1a2333;
-}
-
-/* Настройки общего доступа */
-.sharing-settings {
-  background: #121821;
-  padding: 1.5rem;
-  border-radius: 12px;
-  margin-bottom: 1.5rem;
-}
-
-.settings-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  gap: 1rem;
-}
-
-.setting-group {
-  display: flex;
-  flex-direction: column;
-}
-
-.setting-group label {
-  margin-bottom: 0.5rem;
-  color: #a9b6c6;
-  font-size: 0.9rem;
-}
-
-.checkbox-label {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  cursor: pointer;
-}
-
-.checkbox-label input[type="checkbox"] {
-  width: auto;
-  margin: 0;
-}
-
-/* Секции */
-.search-section, .upload-section {
-  margin-bottom: 1.5rem;
-}
-
+/* --- Upload row: выравниваем всё по одной линии и не даём тексту наезжать --- */
 .upload-section {
   display: flex;
-  gap: 1rem;
+  align-items: center;   /* вертикальное выравнивание по центру */
+  gap: 0.75rem;          /* расстояние между элементами */
+  flex-wrap: wrap;       /* чтобы на узких экранах элементы переносились аккуратно */
+}
+
+.upload-section > .btn-primary,
+.upload-section > label.btn-primary {
+  display: inline-flex;          /* чтобы кнопка не растягивалась и была по центру */
   align-items: center;
+  justify-content: center;
 }
 
-/* Список файлов */
-.file-list {
-  background: #121821;
-  padding: 1.5rem;
-  border-radius: 12px;
-}
-
-.no-files {
-  color: #88a;
-  text-align: center;
-  padding: 2rem;
-}
-
-.files-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.files-table th,
-.files-table td {
-  padding: 12px;
-  text-align: left;
-  border-bottom: 1px solid #334;
-}
-
-.files-table th {
+.selected-files-hint {
+  display: inline-block;         /* участвует в потоке, а не «налезает» */
+  position: static !important;   /* на всякий случай, если где-то переопределяли */
+  margin: 0 .25rem;
+  line-height: 1.2;
+  white-space: nowrap;           /* не переносить «1 file(s) selected» */
   color: #a9b6c6;
-  font-weight: 600;
 }
 
-.files-table tr:hover {
-  background: #1a2333;
+/* На очень узких экранах можно подровнять перенос */
+@media (max-width: 640px) {
+  .upload-section { align-items: flex-start; }
 }
 
-.share-link {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
+.btn-link { display: inline-block; }
+.forgot-link { margin-top: .5rem; }
+
+.auth-form .muted,
+.auth-form p + .muted {
+  color: #a9b6c6;
+  font-size: 0.9rem;
+  margin: .25rem 0 .75rem;
 }
 
-.share-link a {
-  color: #2a7cff;
-  text-decoration: none;
-}
-
-.share-link a:hover {
-  text-decoration: underline;
-}
-
-.share-link button {
-  background: transparent;
-  color: #9fc0ff;
-  border: none;
-  cursor: pointer;
-  padding: 4px 8px;
-}
-
-.share-link button:hover {
-  color: #7aaaff;
-}
-
-/* Сообщения */
-.message {
-  padding: 12px;
-  border-radius: 8px;
-  margin-bottom: 1rem;
-}
-
-.message-success {
-  background: #d4edda;
-  color: #155724;
-  border: 1px solid #c3e6cb;
-}
-
-.message-error {
-  background: #f8d7da;
-  color: #721c24;
-  border: 1px solid #f5c6cb;
-}
-
-/* Адаптивность */
-@media (max-width: 768px) {
-  .container {
-    padding: 1rem;
-  }
-  
-  header {
-    flex-direction: column;
-    gap: 1rem;
-    align-items: flex-start;
-  }
-  
-  .settings-grid {
-    grid-template-columns: 1fr;
-  }
-  
-  .upload-section {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-  
-  .files-table {
-    font-size: 0.9rem;
-  }
-  
-  .files-table th,
-  .files-table td {
-    padding: 8px;
-  }
+/* Подсказка под полем кода (TTL / expired) */
+.auth-form .code-hint {
+  margin: 0.25rem 0 0.9rem; /* верх/бока/низ — тут как раз нижний отступ */
+  color: #a9b6c6;
+  font-size: 0.9rem;
 }

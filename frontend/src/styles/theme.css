@@ -1,0 +1,170 @@
+:root{
+  --bg: #0b1220;
+  --bg-soft: #0f172a;
+  --card: #111827;
+  --muted: #94a3b8;
+  --text: #e5e7eb;
+  --primary: #0ea5e9;
+  --primary-600: #0284c7;
+  --ring: 0 0 0 3px rgba(14,165,233,.35);
+  --shadow: 0 10px 30px rgba(2,132,199,.25);
+}
+
+*{ box-sizing: border-box; }
+
+html, body, #root{ height: 100%; }
+
+body{
+  margin:0;
+  background: radial-gradient(1200px 700px at 10% -10%, rgba(14,165,233,.15), transparent 60%),
+              radial-gradient(1000px 600px at 90% 10%, rgba(59,130,246,.12), transparent 60%),
+              var(--bg);
+  color: var(--text);
+  font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  letter-spacing: 0.2px;
+}
+
+.container{
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px 20px 64px;
+}
+
+.header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+  margin-bottom: 18px;
+}
+
+.brand{
+  display:flex; align-items:center; gap:10px;
+  font-weight:700; font-size:18px;
+}
+.brand-badge{
+  width:28px; height:28px; border-radius:8px;
+  background: linear-gradient(135deg, var(--primary), #60a5fa);
+  box-shadow: var(--shadow);
+}
+
+.card{
+  background: linear-gradient(180deg, rgba(255,255,255,.02), transparent 20%) , var(--card);
+  border: 1px solid rgba(148,163,184,.15);
+  border-radius: 16px;
+  padding: 18px;
+  box-shadow: 0 20px 40px rgba(0,0,0,.25);
+}
+
+.controls{
+  display:flex; gap:10px; flex-wrap:wrap; align-items:center;
+}
+
+.input, .select{
+  background: var(--bg-soft);
+  color: var(--text);
+  border: 1px solid rgba(148,163,184,.2);
+  border-radius: 12px;
+  padding: 10px 12px;
+  outline: none;
+  transition: .2s border-color, .2s box-shadow, .2s transform;
+}
+.input:focus, .select:focus{ border-color: var(--primary); box-shadow: var(--ring); }
+
+.btn{
+  appearance:none;
+  border: none;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: .2s transform, .2s box-shadow, .2s background;
+  display:inline-flex; align-items:center; gap:8px;
+}
+
+.btn-primary{
+  background: linear-gradient(135deg, var(--primary), #60a5fa);
+  color: white;
+  box-shadow: var(--shadow);
+}
+.btn-primary:hover{ transform: translateY(-1px); }
+.btn-primary:active{ transform: translateY(0); }
+
+.btn-secondary{
+  background: transparent;
+  color: var(--text);
+  border: 1px solid rgba(148,163,184,.25);
+}
+.btn-secondary:hover{ border-color: var(--primary); }
+
+.section-title{
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 10px;
+  color: #cbd5e1;
+}
+
+.files-table{
+  width:100%;
+  border-collapse: collapse;
+  font-size: .95rem;
+}
+.files-table th, .files-table td{
+  padding: 12px 10px;
+  border-bottom: 1px solid rgba(148,163,184,.16);
+}
+.files-table thead th{
+  text-align:left;
+  font-weight:600;
+  color: #cbd5e1;
+  position: sticky;
+  top:0;
+  background: var(--card);
+}
+.files-table tbody tr:hover td{
+  background: rgba(2,132,199,.06);
+}
+
+.badge{
+  display:inline-block;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(148,163,184,.15);
+  color: #cbd5e1;
+  font-size: .8rem;
+}
+
+.footer-note{ color: var(--muted); font-size:.85rem; margin-top:8px; }
+.search-and-filters{
+  display:flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.search-section{ display:flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.filters-panel{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-top: 10px;
+}
+.filter-group{ display:flex; flex-direction: column; gap:6px; }
+.form-input{ 
+  background: var(--bg-soft);
+  color: var(--text);
+  border: 1px solid rgba(148,163,184,.2);
+  border-radius: 12px;
+  padding: 10px 12px;
+  outline: none;
+}
+.form-input:focus{ border-color: var(--primary); box-shadow: var(--ring); }
+
+.page-info{ min-width: max-content; }
+.pagination-bar{
+  display:flex; flex-wrap:wrap; align-items:center; gap:10px;
+}
+
+.upload-section.card,
+.files-section.card,
+.auth-section.card{ margin-bottom: 16px; }

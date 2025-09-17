@@ -1,0 +1,31 @@
+services:
+  sast:
+    profiles: ["dev"]
+    image: ${BACKEND_IMAGE:-secure-share-updated1-backend}
+    working_dir: /app
+    volumes:
+      - ./backend:/app:delegated
+      - pip-cache:/root/.cache/pip
+    environment:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    entrypoint: sh
+    command:
+      - -lc
+      - pip install -r requirements.txt -r requirements-dev.txt && ruff check . --fix && mypy app && bandit -c bandit.yaml -r app -lll && pip-audit -r requirements.txt --strict
+
+  eslint:
+    profiles: ["dev"]
+    image: node:20-alpine
+    working_dir: /workspace/frontend
+    volumes:
+      - ./frontend:/workspace/frontend:delegated
+      - npm-cache:/root/.npm
+      - npm-cache:/root/.cache
+    entrypoint: sh
+    command:
+      - -lc
+      - "[ -f package-lock.json ] && npm ci || npm i; npx eslint src --max-warnings=0"
+
+volumes:
+  pip-cache:
+  npm-cache:

@@ -1,5 +1,6 @@
 import os
 
+
 class Settings:
     SECRET_KEY: str = os.getenv("SECRET_KEY", "your-secret-key")
     ALGORITHM: str = "HS256"
@@ -8,35 +9,27 @@ class Settings:
     MINIO_ACCESS_KEY: str = "minioadmin"
     MINIO_SECRET_KEY: str = "minioadmin"
     MINIO_BUCKET: str = "secureshare"
-    MAX_FILE_SIZE: int = 1024 * 1024 * 1024  # 1024MB
-    PUBLIC_BASE_URL: str = "http://localhost:8000/"
+    MAX_FILE_SIZE: int = 1024 * 1024 * 1024  
+    PUBLIC_BASE_URL: str = "https://stylus-consistency-arise-sub.trycloudflare.com"
     ALLOWED_EXTENSIONS: set = {
-            # Документы
             ".pdf", ".doc", ".docx", ".odt", ".rtf", ".txt", ".md",
             ".xls", ".xlsx", ".ods", ".csv",
             ".ppt", ".pptx", ".odp",
             
-            # Изображения
             ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".svg", ".webp", ".heic",
             ".psd", ".ai", ".eps", ".indd",
             
-            # Архивы
             ".zip", ".rar", ".7z", ".tar", ".gz", ".bz2",
             
-            # Аудио
             ".mp3", ".wav", ".flac", ".aac", ".ogg", ".wma", ".m4a",
             
-            # Видео
             ".mp4", ".mov", ".avi", ".mkv", ".flv", ".wmv", ".mpeg", ".webm",
             
-            # Код
             ".py", ".js", ".html", ".css", ".php", ".java", ".c", ".cpp", ".h", 
             ".cs", ".go", ".rb", ".swift", ".kt", ".ts", ".sh", ".bat", ".ps1",
             
-            # Данные
             ".json", ".xml", ".yaml", ".yml", ".sql", ".db", ".sqlite", ".sqlite3",
             
-            # Прочее
             ".exe", ".msi", ".dmg", ".apk", ".iso", ".torrent"
     }
 

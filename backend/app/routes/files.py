@@ -1,33 +1,38 @@
 from __future__ import annotations
 
-import os
-import uuid
-import tempfile
 import logging
+import os
 import secrets
+import tempfile
+import uuid
 from datetime import datetime, timedelta
-from typing import Optional, List
-from uuid import UUID
 
-from fastapi import APIRouter, Depends, UploadFile, Request, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, or_
-from sqlalchemy.orm import aliased
 
-from app.core.database import get_db
 from app.core.config import settings
+from app.core.database import get_db
 from app.core.minio_client import minio_client
+from app.core.security import get_current_user
 from app.dependencies.auth import get_current_user
-from app.models.user import User
 from app.models.file import File
 from app.models.share_link import ShareLink
-from app.schemas.file import FileInfo, UploadResponse, ShareResponse, FileListResponse
+from app.schemas.file import FileInfo, FileListResponse, UploadResponse
+from app.services.index_html import index_html_if_applicable
 from app.utils.urls import build_external_url
 
 logger = logging.getLogger("secure-share")
 
 router = APIRouter(tags=["Files"])
 
+def _mojibake(s: str) -> str | None:
+    try:
+        b = s.encode("utf-8", errors="ignore")
+        m = b.decode("latin1", errors="ignore")
+        return m if m and m != s else None
+    except Exception:
+        return None
 
 @router.post("/upload", response_model=UploadResponse)
 async def upload_file(
@@ -36,10 +41,9 @@ async def upload_file(
     expire_days: int = Query(7, ge=1, le=365),
     create_share: bool = Query(False, description="Return share_url/token in UploadResponse"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user=Depends(get_current_user),
 ):
-    # 1) Сохраняем во временный файл, чтобы получить размер/стрим
-    suffix = ("_" + file.filename) if file.filename else ""
+    suffix = "_" + file.filename if file.filename else ""
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         while True:
             chunk = await file.read(1024 * 1024)
@@ -50,155 +54,159 @@ async def upload_file(
 
     file_size = os.path.getsize(temp_path)
     content_type = file.content_type or "application/octet-stream"
-    object_name = f"{uuid.uuid4()}_{file.filename or 'upload.bin'}"
 
-    # 2) Грузим в MinIO
+    bucket = settings.MINIO_BUCKET
+    object_name = f"{uuid.uuid4()}_{file.filename or 'file.bin'}"
+
     try:
-        with open(temp_path, "rb") as fp:
-            minio_client.put_object(
-                bucket_name=settings.MINIO_BUCKET,
-                object_name=object_name,
-                data=fp,
-                length=file_size,
-                content_type=content_type,
-            )
-    except Exception as e:
-        try:
-            os.unlink(temp_path)
-        except Exception:
-            pass
-        raise HTTPException(status_code=500, detail=f"File upload failed: {e}")
+        minio_client.fput_object(bucket, object_name, temp_path, content_type=content_type)
     finally:
         try:
-            os.unlink(temp_path)
+            os.remove(temp_path)
         except Exception:
             pass
 
-    # 3) Пишем метаданные в БД
-    expires_at = datetime.utcnow() + timedelta(days=expire_days)
-    db_file = File(
-        filename=file.filename or "upload.bin",
+    f = File(
+        id=str(uuid.uuid4()),
+        filename=file.filename or object_name,
         content_type=content_type,
         size=file_size,
-        owner_id=current_user.id,
+        owner_id=str(current_user.id) if hasattr(current_user, "id") else current_user["id"],
         created_at=datetime.utcnow(),
-        expires_at=expires_at,
-        bucket=settings.MINIO_BUCKET,
+        expires_at=datetime.utcnow() + timedelta(days=expire_days),
+        bucket=bucket,
         object_name=object_name,
     )
-    db.add(db_file)
+    db.add(f)
     await db.commit()
-    await db.refresh(db_file)
+    await db.refresh(f)
 
-    share_url: Optional[str] = None
-    token: Optional[str] = None
+    try:
+        page = await index_html_if_applicable(db, f)
+        if page:
+            await db.commit()
+    except Exception as e:
+        logger.exception("HTML indexing failed for file %s: %s", f.id, e)
+    
+    resp = UploadResponse(
+        id=f.id, filename=f.filename, content_type=f.content_type, size=f.size, created_at=f.created_at, expires_at=f.expires_at
+    )
 
-    # 4) По запросу — сразу создаём шар-ссылку
     if create_share:
-        token = secrets.token_urlsafe(24)
-        link = ShareLink(
-            file_id=str(db_file.id),
-            token=token,
-            expires_at=expires_at,
+        s = ShareLink(
+            id=str(uuid.uuid4()),
+            file_id=f.id,
+            token=secrets.token_urlsafe(24),
+            created_at=datetime.utcnow(),
+            expires_at=f.expires_at,
+            max_views=None,
+            views=0,
             is_active=True,
         )
-        db.add(link)
+        db.add(s)
         await db.commit()
-        await db.refresh(link)
-        share_url = build_external_url(request, f"/s/{token}")
+        share_url = build_external_url(request, f"/download/{s.token}")
+        resp.share_url = share_url
+        resp.token = s.token
 
-    # 5) Возвращаем UploadResponse (+share_url/token при необходимости)
-    return UploadResponse(
-        id=db_file.id,
-        filename=db_file.filename,
-        content_type=db_file.content_type,
-        size=db_file.size,
-        expires_at=db_file.expires_at,
-        share_url=share_url,
-        token=token,
-    )
+    return resp
 
 
-@router.get("/files/{file_id}", response_model=FileInfo)
-async def get_file_info(
-    file_id: UUID,
+@router.delete("/files/{file_id}")
+async def delete_file(
+    file_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user=Depends(get_current_user),
 ):
-    res = await db.execute(select(File).where(File.id == str(file_id)))
-    file = res.scalars().first()
-    if not file:
+    res = await db.execute(select(File).where(File.id == file_id))
+    file_obj = res.scalars().first()
+    if not file_obj:
         raise HTTPException(status_code=404, detail="File not found")
-    if file.owner_id != current_user.id and not getattr(current_user, "is_admin", False):
-        raise HTTPException(status_code=403, detail="Access denied")
-    return FileInfo(
-        id=file.id,
-        filename=file.filename,
-        content_type=file.content_type,
-        size=file.size,
-        created_at=file.created_at,
-        expires_at=file.expires_at,
-    )
+    owner_id = getattr(current_user, "id", None)
+    is_admin = bool(getattr(current_user, "is_admin", False))
+    if str(file_obj.owner_id) != str(owner_id) and not is_admin:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    try:
+        if file_obj.bucket and file_obj.object_name:
+            minio_client.remove_object(file_obj.bucket, file_obj.object_name)
+    except Exception:
+        logging.exception("MinIO remove_object failed for %s/%s", file_obj.bucket, file_obj.object_name)
+
+    await db.delete(file_obj)
+    await db.commit()
+    return {"status": "ok", "id": file_id}
 
 
 @router.get("/files", response_model=FileListResponse)
 async def list_files(
-    search: Optional[str] = Query(None, description="Search by filename"),
-    file_type: Optional[str] = Query(None, description="Filter by file extension (e.g., 'pdf', 'jpg')"),
-    start_date: Optional[str] = Query(None, description="Filter by creation date (YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="Filter by creation date (YYYY-MM-DD)"),
+    request: Request,
+    search: str | None = Query(None, description="Search by filename"),
+    file_type: str | None = Query(None, description="Filter by extension (e.g., 'pdf')"),
+    start_date: str | None = Query(None, description="Filter by created_at >= YYYY-MM-DD"),
+    end_date: str | None = Query(None, description="Filter by created_at <= YYYY-MM-DD"),
+    sort_by: str = Query("created_at"),
+    order: str = Query("desc"),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user=Depends(get_current_user),
 ):
-    # Базовый запрос для файлов пользователя
-    query = select(File).where(File.owner_id == current_user.id)
-    
-    # Поиск по имени файла
+    conditions = [File.owner_id == (str(current_user.id) if hasattr(current_user, "id") else current_user["id"])]
     if search and search.strip():
-        query = query.where(File.filename.ilike(f"%{search.strip()}%"))
-    
-    # Фильтр по типу файла (расширению)
+        needle = search.strip()
+        mb = _mojibake(needle)
+        like_exprs = [File.filename.ilike(f"%{needle}%")]
+        if mb:
+            like_exprs.append(File.filename.ilike(f"%{mb}%"))
+        conditions.append(or_(*like_exprs))
+
     if file_type:
-        # Добавляем точку к расширению, если её нет
-        if not file_type.startswith('.'):
-            file_type = f".{file_type}"
-        query = query.where(File.filename.ilike(f"%{file_type}"))
-    
-    # Фильтр по дате создания
+        ext = file_type.lower().lstrip(".")
+        conditions.append(File.filename.ilike(f"%.{ext}"))
+
+    def _parse_date(s: str, end=False) -> datetime | None:
+        try:
+            s2 = (s or "").strip()
+            if not s2:
+                return None
+            dt = datetime.fromisoformat(s2)
+            if end and len(s2) == 10:
+                return dt.replace(hour=23, minute=59, second=59, microsecond=999999)
+            return dt
+        except Exception:
+            return None
+
     if start_date:
-        try:
-            start_datetime = datetime.strptime(start_date, "%Y-%m-%d")
-            query = query.where(File.created_at >= start_datetime)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid start_date format. Use YYYY-MM-DD.")
-    
+        sd = _parse_date(start_date)
+        if sd:
+            conditions.append(File.created_at >= sd)
     if end_date:
-        try:
-            end_datetime = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
-            query = query.where(File.created_at < end_datetime)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid end_date format. Use YYYY-MM-DD.")
-    
-    # Получаем общее количество файлов (до пагинации)
-    count_query = select(func.count()).select_from(query.subquery())
-    total_count = (await db.execute(count_query)).scalar()
-    
-    # Добавляем сортировку и пагинацию
-    query = query.order_by(File.created_at.desc()).offset(skip).limit(limit)
-    
-    # Выполняем запрос
-    res = await db.execute(query)
-    rows = res.scalars().all()
-    
-    # Формирование ответа
-    files = [FileInfo.from_orm(f) for f in rows]
-    total_count = await get_total_count(db, current_user.id, search, file_type, start_date, end_date)
-    
-    return FileListResponse(
-        files=files,
-        total=total_count,
-        skip=skip,
-        limit=limit
-    )
+        ed = _parse_date(end_date, end=True)
+        if ed:
+            conditions.append(File.created_at <= ed)
+
+    where_clause = and_(*conditions) if conditions else None
+
+    count_stmt = select(func.count()).select_from(File)
+    if where_clause is not None:
+        count_stmt = count_stmt.where(where_clause)
+    total = (await db.execute(count_stmt)).scalar_one()
+
+    query = select(File)
+    if where_clause is not None:
+        query = query.where(where_clause)
+
+    allowed = {
+        "created_at": File.created_at,
+        "filename": File.filename,
+        "size": File.size,
+    }
+    col = allowed.get(sort_by, File.created_at)
+    query = query.order_by(col.asc() if order.lower() == "asc" else col.desc())
+
+    query = query.offset(skip).limit(limit)
+
+    rows = (await db.execute(query)).scalars().all()
+    files = [FileInfo.from_orm(r) for r in rows]
+    return FileListResponse(files=files, total=total, skip=skip, limit=limit)

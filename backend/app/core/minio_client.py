@@ -1,6 +1,8 @@
+import logging
+
 from minio import Minio
 from minio.error import S3Error
-import logging
+
 from .config import settings
 
 logger = logging.getLogger("secure-share")

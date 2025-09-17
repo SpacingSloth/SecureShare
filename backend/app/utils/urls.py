@@ -1,6 +1,7 @@
-from typing import Optional
 from fastapi import Request
+
 from app.core.config import settings
+
 
 def external_base_url(request: Request) -> str:
     if settings.PUBLIC_BASE_URL:

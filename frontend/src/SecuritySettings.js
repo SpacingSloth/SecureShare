@@ -6,14 +6,12 @@ const SecuritySettings = ({ api }) => {
   const [loading, setLoading] = useState(false);
   const [statusLoading, setStatusLoading] = useState(true);
   const [message, setMessage] = useState('');
-  
-  // Состояния для смены пароля
+
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordLoading, setPasswordLoading] = useState(false);
 
-  // Функция для получения статуса 2FA
   const fetch2FAStatus = async () => {
     try {
       setStatusLoading(true);
@@ -21,7 +19,7 @@ const SecuritySettings = ({ api }) => {
       setIs2FAEnabled(response.data.two_factor_enabled);
     } catch (error) {
       console.error('Failed to fetch 2FA status', error);
-      setMessage('Ошибка при получении статуса 2FA');
+      setMessage('Error retrieving 2FA status');
     } finally {
       setStatusLoading(false);
     }
@@ -36,58 +34,52 @@ const SecuritySettings = ({ api }) => {
     try {
       const endpoint = is2FAEnabled ? '/disable-2fa' : '/enable-2fa';
       const response = await api.post(endpoint);
-      
-      // Обновляем состояние на основе ответа сервера
       setIs2FAEnabled(response.data.enabled);
       setMessage(response.data.message);
     } catch (error) {
       console.error('Failed to toggle 2FA', error);
-      setMessage('Ошибка при изменении настроек 2FA: ' + (error.response?.data?.detail || error.message));
-      // В случае ошибки перезапрашиваем статус
-      fetch2FAStatus();
+      setMessage('Error updating 2FA settings: ' + (error.response?.data?.detail || error.message));
+      fetch2FAStatus(); 
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const changePassword = async () => {
-    // Проверяем, что пароли совпадают
     if (newPassword !== confirmPassword) {
-      setMessage('Новый пароль и подтверждение не совпадают');
+      setMessage('New password and confirmation do not match');
       return;
     }
-    
-    // Проверяем минимальную длину пароля
     if (newPassword.length < 8) {
-      setMessage('Пароль должен содержать не менее 8 символов');
+      setMessage('Password must be at least 8 characters');
       return;
     }
-    
+
     setPasswordLoading(true);
     try {
       await api.post('/change-password', {
         current_password: currentPassword,
-        new_password: newPassword
+        new_password: newPassword,
       });
-      
-      setMessage('Пароль успешно изменен');
-      // Очищаем поля формы
+      setMessage('Password updated successfully');
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
     } catch (error) {
       console.error('Failed to change password', error);
-      setMessage('Ошибка при изменении пароля: ' + (error.response?.data?.detail || error.message));
+      setMessage('Error updating password: ' + (error.response?.data?.detail || error.message));
+    } finally {
+      setPasswordLoading(false);
     }
-    setPasswordLoading(false);
   };
 
   if (statusLoading) {
     return (
       <div className="security-settings">
-        <h2>Настройки безопасности</h2>
+        <h2>Security</h2>
         <p className="loading-text">
           <span className="loading-indicator"></span>
-          Загрузка статуса 2FA...
+          Loading 2FA status...
         </p>
       </div>
     );
@@ -95,72 +87,101 @@ const SecuritySettings = ({ api }) => {
 
   return (
     <div className="security-settings">
-      <h2>Настройки безопасности</h2>
+      <h2>Security</h2>
+
       {message && (
-        <div className={`message ${message.includes('Ошибка') ? 'message-error' : 'message-success'}`}>
+        <div className={`message ${message.includes('Error') ? 'message-error' : 'message-success'}`}>
           {message}
         </div>
       )}
-      
+
       <div className="setting-item">
-        <h3>Двухфакторная аутентификация</h3>
+        <h3>Two-factor authentication</h3>
         <p>
-          Двухфакторная аутентификация добавляет дополнительный уровень безопасности к вашей учетной записи, 
-          требуя не только пароль для входа.
+          Two-factor authentication adds an extra layer of security to your account,
+          requiring more than just a password to sign in.
         </p>
-        
-        <div className="status-text">
-          Текущий статус: 
+
+        {/* небольшой гарантированный отступ над кнопкой */}
+        <div className="status-text" style={{ marginBottom: '0.9rem' }}>
+          Current status:{' '}
           <span className={`status-indicator ${is2FAEnabled ? 'status-enabled' : 'status-disabled'}`}>
-            {is2FAEnabled ? 'Включена' : 'Выключена'}
+            {is2FAEnabled ? 'Enabled' : 'Disabled'}
           </span>
         </div>
-        
-        <button 
-          onClick={toggle2FA} 
+
+        <button
+          onClick={toggle2FA}
           disabled={loading}
           className={is2FAEnabled ? 'btn-danger' : 'btn-primary'}
         >
-          {loading ? 'Обработка...' : (is2FAEnabled ? 'Отключить 2FA' : 'Включить 2FA')}
+          {loading ? 'Working...' : (is2FAEnabled ? 'Disable 2FA' : 'Enable 2FA')}
         </button>
       </div>
-      
+
       <div className="setting-item">
-        <h3>Смена пароля</h3>
-        <p>
-          Регулярная смена пароля повышает безопасность вашей учетной записи.
-        </p>
-        
-        <div className="password-form">
+        <h3>Change password</h3>
+        <p>Changing your password regularly improves your account security.</p>
+
+        {/* форма без автоподстановки */}
+        <form
+          className="password-form"
+          autoComplete="off"
+          onSubmit={(e) => { e.preventDefault(); changePassword(); }}
+        >
+          {/* Декой-поля: уводят менеджеры паролей от реального current password */}
+          <input type="text" name="username" autoComplete="username" style={{ display: 'none' }} readOnly />
+          <input type="password" name="password" autoComplete="new-password" style={{ display: 'none' }} readOnly />
+
+          {/* Current password — отключаем автоподстановку */}
           <input
+            id="currentPassword"
             type="password"
-            placeholder="Текущий пароль"
+            className="form-input"
+            placeholder="Current password"
+            name="current_password_unmanaged"
             value={currentPassword}
             onChange={(e) => setCurrentPassword(e.target.value)}
-            className="form-input"
+            autoComplete="off"
+            aria-autocomplete="none"
+            autoCapitalize="off"
+            autoCorrect="off"
+            inputMode="text"
+            data-lpignore="true"
+            data-1p-ignore
+            data-bwignore="true"
+            onFocus={(e) => e.currentTarget.setAttribute('autocomplete', 'off')}
           />
+
           <input
             type="password"
-            placeholder="Новый пароль"
+            placeholder="New password"
             value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)}
             className="form-input"
+            name="new_password"
+            autoComplete="new-password"
           />
+
           <input
             type="password"
-            placeholder="Подтвердите новый пароль"
+            placeholder="Confirm new password"
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}
             className="form-input"
+            name="confirm_new_password"
+            autoComplete="new-password"
           />
-          <button 
-            onClick={changePassword} 
+
+          <button
+            type="submit"
+            onClick={changePassword}
             disabled={passwordLoading}
             className="btn-primary"
           >
-            {passwordLoading ? 'Изменение...' : 'Изменить пароль'}
+            {passwordLoading ? 'Updating...' : 'Update password'}
           </button>
-        </div>
+        </form>
       </div>
     </div>
   );

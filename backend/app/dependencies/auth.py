@@ -1,10 +1,11 @@
-from fastapi.security import OAuth2PasswordBearer
 from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from app.core.database import get_db
+
 from app.core.config import settings
+from app.core.database import get_db
 from app.models.user import User
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
@@ -30,7 +31,6 @@ async def get_current_user(
     except JWTError:
         raise credentials_exception
     
-    # Асинхронный запрос к базе данных
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalars().first()
     

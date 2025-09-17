@@ -1,17 +1,17 @@
+from datetime import datetime, timedelta
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
-from app.core.config import settings
 from passlib.context import CryptContext
-from datetime import datetime, timedelta
-from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+
+from app.core.config import settings
 from app.core.database import get_db
 from app.models.user import User
 
-# Определяем oauth2_scheme
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/token")
 
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
@@ -30,7 +30,6 @@ async def get_current_user(
     except JWTError:
         raise credentials_exception
     
-    # Получаем пользователя из базы данных
     result = await db.execute(select(User).filter(User.email == email))
     user = result.scalars().first()
     
@@ -47,7 +46,7 @@ def verify_password(plain_password, hashed_password):
 def get_password_hash(password):
     return pwd_context.hash(password)
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+def create_access_token(data: dict, expires_delta: timedelta | None = None):
     to_encode = data.copy()
     
     if expires_delta:

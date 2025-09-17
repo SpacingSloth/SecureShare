@@ -1,11 +1,10 @@
-
 from __future__ import annotations
 
 import secrets
 from datetime import datetime, timedelta
-from typing import Optional
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,22 +12,21 @@ from app.core.database import get_db
 from app.dependencies.auth import get_current_user
 from app.models.file import File
 from app.models.share_link import ShareLink
+from app.models.user import User
 from app.schemas.file import ShareResponse
 from app.utils.urls import build_external_url
 
 router = APIRouter(prefix="/share-links", tags=["Share Links"])
-
 
 @router.post("/create", response_model=ShareResponse)
 async def create_share_link(
     request: Request,
     file_id: str = Query(..., description="ID of the file to share"),
     expire_days: int = Query(7, ge=1, le=365, description="Days until link expiration"),
-    max_views: Optional[int] = Query(None, ge=1, description="Optional maximum number of downloads"),
+    max_views: int | None = Query(None, ge=1, description="Optional maximum number of downloads"),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    # Validate file ownership
     res = await db.execute(select(File).where(File.id == file_id))
     file = res.scalars().first()
     if not file:
@@ -36,7 +34,6 @@ async def create_share_link(
     if file.owner_id != current_user.id and not getattr(current_user, "is_admin", False):
         raise HTTPException(status_code=403, detail="Access denied")
 
-    # Create token and link
     token = secrets.token_urlsafe(24)
     link = ShareLink(
         file_id=str(file.id),
@@ -49,10 +46,7 @@ async def create_share_link(
     await db.commit()
     await db.refresh(link)
 
-    # Build URLs
     page_url = build_external_url(request, f"/s/{token}")
-    # Direct stream url (sometimes handy)
-    direct_url = build_external_url(request, f"/download/{token}")
 
     return ShareResponse(share_url=page_url, token=token, expires_at=link.expires_at)
 
@@ -60,7 +54,7 @@ async def create_share_link(
 @router.get("/{token}/meta")
 async def get_share_meta(token: str, db: AsyncSession = Depends(get_db)):
     res = await db.execute(select(ShareLink).where(ShareLink.token == token))
-    link: Optional[ShareLink] = res.scalars().first()
+    link: ShareLink | None = res.scalars().first()
     if not link or not link.is_active or (link.expires_at and link.expires_at <= datetime.utcnow()):
         raise HTTPException(status_code=404, detail="Share link not found")
 
@@ -83,12 +77,11 @@ async def ensure_share_link(
     request: Request,
     file_id: str = Query(..., description="ID of the file"),
     expire_days: int = Query(7, ge=1, le=365),
-    max_views: Optional[int] = Query(None, ge=1),
+    max_views: int | None = Query(None, ge=1),
     reuse: bool = Query(True, description="If true, return an existing active link if found"),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    # ownership check
     res = await db.execute(select(File).where(File.id == file_id))
     file = res.scalars().first()
     if not file:
@@ -99,12 +92,12 @@ async def ensure_share_link(
     now = datetime.utcnow()
 
     if reuse:
-        # try to find active link
         res = await db.execute(
             select(ShareLink).where(
                 ShareLink.file_id == file_id,
-                ShareLink.is_active == True,  # noqa: E712
-                (ShareLink.expires_at == None) | (ShareLink.expires_at > now),  # noqa: E711
+                ShareLink.is_active == True,  
+                (ShareLink.expires_at == None) | (ShareLink.expires_at > now),  
+                (ShareLink.max_views == None) | (ShareLink.views < ShareLink.max_views),  
             )
         )
         existing = res.scalars().first()
@@ -112,7 +105,6 @@ async def ensure_share_link(
             page_url = build_external_url(request, f"/s/{existing.token}")
             return ShareResponse(share_url=page_url, token=existing.token, expires_at=existing.expires_at)
 
-    # else create
     token = secrets.token_urlsafe(24)
     link = ShareLink(
         file_id=str(file.id),
@@ -127,3 +119,52 @@ async def ensure_share_link(
 
     page_url = build_external_url(request, f"/s/{token}")
     return ShareResponse(share_url=page_url, token=token, expires_at=link.expires_at)
+
+
+
+from pydantic import BaseModel as _BaseModel
+
+router_compat = APIRouter(tags=["Share Links"])
+
+class _CreateShareBody(_BaseModel):
+    expire_days: int | None = None
+    max_views: int | None = None
+    reuse_existing: bool | None = None
+
+@router_compat.post("/share/{file_id}", response_model=ShareResponse)
+async def create_share_link_compat(
+    request: Request,
+    file_id: UUID,
+    body: _CreateShareBody | None = None,
+    expire_days: int | None = Query(None, ge=1, le=365),
+    max_views: int | None = Query(None, ge=0),
+    reuse_existing: bool | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Совместимый эндпоинт, принимающий file_id в пути и параметры в JSON или query.
+    Делегирует в /share-links/ensure.
+    """
+    eff_expire_days = body.expire_days if body and body.expire_days is not None else expire_days
+    eff_max_views = body.max_views if body and body.max_views is not None else max_views
+    eff_reuse = body.reuse_existing if body and body.reuse_existing is not None else reuse_existing
+
+    if eff_expire_days is None:
+        eff_expire_days = 7
+    if eff_max_views is not None and eff_max_views <= 0:
+        eff_max_views = None
+    if eff_reuse is None:
+        eff_reuse = False
+
+    return await ensure_share_link(
+        request=request,
+        file_id=str(file_id),
+        expire_days=eff_expire_days,
+        max_views=eff_max_views,
+        reuse=eff_reuse,
+        db=db,
+        current_user=current_user,
+    )
+
+__all__ = ["router", "router_compat"]

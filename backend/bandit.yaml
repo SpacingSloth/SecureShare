@@ -1,0 +1,19 @@
+# Умеренно строгий профиль для FastAPI/SQLAlchemy
+severity: MEDIUM
+confidence: MEDIUM
+
+# Убираем шум
+skips:
+  - B311  # random для не-крипт. задач допустим
+
+# Исключаем болтливые зоны
+exclude_dirs:
+  - venv
+  - .venv
+  - alembic/versions
+  - tests
+
+# Что анализировать (внутри контейнера это /app/...)
+targets:
+  - app
+  - alembic

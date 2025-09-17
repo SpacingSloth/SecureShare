@@ -1,4 +1,4 @@
-FROM python:3.10-slim
+FROM mirror.gcr.io/library/python:3.10-slim
 
 # Установка зависимостей для aiosqlite
 RUN apt-get update && apt-get install -y libsqlite3-dev
@@ -11,7 +11,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Копирование кода приложения
 COPY ./app ./app
-COPY ./migrations ./migrations
+COPY ./alembic ./alembic
+COPY ./alembic.ini ./alembic.ini
 
 # Точка входа
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--no-reload"]

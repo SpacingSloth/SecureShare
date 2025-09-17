@@ -1,73 +1,76 @@
-import axios from 'axios';
 import './App.css';
+import './styles/theme.css';
+import api, { setOnUnauthorized } from './lib/api';
+import { ensureShareLink } from './lib/sharing';
+import CopyButton from './components/CopyButton.jsx';
 import SecuritySettings from './SecuritySettings';
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 
-// Конфигурация API
-const api = axios.create({
-  baseURL: 'http://localhost:8000',
-});
-
-// Перехватчик для авторизации
-api.interceptors.request.use(config => {
-  const token = localStorage.getItem('token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
-
-// Перехватчик для обработки ошибок 401
-api.interceptors.response.use(
-  response => response,
-  error => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('token');
-      setUser(null);
-      setAuthMode('login');
-    }
-    return Promise.reject(error);
-  }
+const Toggle = ({ id, checked, onChange, label }) => (
+  <label className="toggle" htmlFor={id}>
+    <input
+      id={id}
+      type="checkbox"
+      className="toggle-input sr-only"
+      checked={checked}
+      onChange={(e) => onChange(e.target.checked)}
+    />
+    <span className="toggle-track" aria-hidden="true">
+      <span className="toggle-thumb" />
+    </span>
+    <span className="toggle-text">{label}</span>
+  </label>
 );
 
-// Компоненты аутентификации
 const LoginForm = ({
-  email,
-  setEmail,
-  password,
-  setPassword,
+  email, setEmail,
+  password, setPassword,
   onLogin,
   onSwitchToRegister,
   onShowForgotPassword
 }) => (
   <div className="auth-form">
-    <h2>Вход</h2>
+    <h2>Sign in</h2>
+
     <input
       type="email"
       placeholder="Email"
       value={email}
       onChange={(e) => setEmail(e.target.value)}
       className="form-input"
+      autoComplete="username"
     />
+
     <input
       type="password"
       placeholder="Password"
       value={password}
       onChange={(e) => setPassword(e.target.value)}
       className="form-input"
+      autoComplete="current-password"
     />
+
     <div className="auth-buttons">
-      <button onClick={onLogin} className="btn-primary">Login</button>
-      <button onClick={onSwitchToRegister} className="btn-secondary">Нет аккаунта? Зарегистрироваться</button>
-      <button onClick={onShowForgotPassword} className="btn-link">Забыли пароль?</button>
+      <button type="button" onClick={onLogin} className="btn-primary">Login</button>
+      <button type="button" onClick={onSwitchToRegister} className="btn-secondary">
+        No account? Sign up
+      </button>
     </div>
+
+    <button
+      type="button"
+      onClick={onShowForgotPassword}
+      className="btn-link forgot-link"
+    >
+      Forgot password?
+    </button>
   </div>
 );
 
 const RegisterForm = ({ email, setEmail, password, setPassword, onRegister, onSwitchToLogin }) => (
   <div className="auth-form">
-    <h2>Регистрация</h2>
+    <h2>Sign up</h2>
     <input
       type="email"
       placeholder="Email"
@@ -84,7 +87,7 @@ const RegisterForm = ({ email, setEmail, password, setPassword, onRegister, onSw
     />
     <div className="auth-buttons">
       <button onClick={onRegister} className="btn-primary">Register</button>
-      <button onClick={onSwitchToLogin} className="btn-secondary">Уже есть аккаунт? Войти</button>
+      <button onClick={onSwitchToLogin} className="btn-secondary"> Back to sign in</button>
     </div>
   </div>
 );
@@ -102,109 +105,126 @@ const VerificationForm = ({
     <p>{message}</p>
     <input
       type="text"
-      placeholder="Код подтверждения"
+      placeholder="Verification code"
       value={verificationCode}
       onChange={(e) => setVerificationCode(e.target.value)}
       className="form-input"
     />
     <div className="auth-buttons">
-      <button onClick={onVerify} className="btn-primary">Подтвердить</button>
-      <button onClick={onCancel} className="btn-secondary">Назад к входу</button>
+      <button onClick={onVerify} className="btn-primary" disabled={!verificationCode.trim()}>Verify</button>
+      <button onClick={onCancel} className="btn-secondary">Back to sign in</button>
     </div>
   </div>
 );
 
-const ForgotPasswordForm = (props) => {
-  const {
-    resetEmail,
-    setResetEmail,
-    onResetRequest,
-    onBackToLogin,
-    resetLoading
-  } = props;
+const ForgotPasswordForm = ({
+  resetEmail, setResetEmail,
+  onResetRequest,
+  onBackToLogin,
+  resetLoading,
+  forgotCooldown
+}) => (
+  <div className="auth-form">
+    <h2>Password recovery</h2>
+    <p>Enter your email and we will send you a reset code</p>
 
-  return (
-    <div className="auth-form">
-      <h2>Восстановление пароля</h2>
-      <p>Введите ваш email, и мы вышлем вам код для сброса пароля</p>
-      <input
-        type="email"
-        placeholder="Email"
-        value={resetEmail}
-        onChange={(e) => setResetEmail(e.target.value)}
-        className="form-input"
-      />
-      <div className="auth-buttons">
-        <button onClick={onResetRequest} disabled={resetLoading} className="btn-primary">
-          {resetLoading ? 'Отправка...' : 'Отправить код'}
-        </button>
-        <button onClick={onBackToLogin} className="btn-secondary">Назад к входу</button>
-      </div>
+    <input
+      type="email"
+      placeholder="Email"
+      value={resetEmail}
+      onChange={(e) => setResetEmail(e.target.value)}
+      className="form-input"
+      autoComplete="email"
+    />
+
+    <div className="auth-buttons">
+      <button
+        onClick={onResetRequest}
+        disabled={resetLoading || forgotCooldown > 0 || !resetEmail.trim()}
+        className="btn-primary"
+        type="button"
+      >
+        {resetLoading ? 'Sending...' : (forgotCooldown > 0 ? `Resend in ${forgotCooldown}s` : 'Send code')}
+      </button>
+
+      <button onClick={onBackToLogin} className="btn-secondary" type="button">
+        Back to sign in
+      </button>
     </div>
-  );
-};
+  </div>
+);
 
-const ResetPasswordForm = (props) => {
-  const {
-    resetEmail,
-    setResetEmail,
-    resetCode,
-    setResetCode,
-    newPassword,
-    setNewPassword,
-    onResetPassword,
-    onBack,
-    resetLoading
-  } = props;
+const ResetPasswordForm = ({
+  resetEmail, setResetEmail,
+  resetCode, setResetCode,
+  newPassword, setNewPassword,
+  onResetPassword,
+  onBack,
+  resetLoading,
+  resetTTL
+}) => (
+  <div className="auth-form">
+    <h2>Reset password</h2>
+    <p>Enter the code you received by email and your new password</p>
 
-  return (
-    <div className="auth-form">
-      <h2>Сброс пароля</h2>
-      <p>Введите код, который вы получили по email, и новый пароль</p>
-      <input
-        type="email"
-        placeholder="Email"
-        value={resetEmail}
-        onChange={(e) => setResetEmail(e.target.value)}
-        className="form-input"
-      />
-      <input
-        type="text"
-        placeholder="Код подтверждения"
-        value={resetCode}
-        onChange={(e) => setResetCode(e.target.value)}
-        className="form-input"
-      />
-      <input
-        type="password"
-        placeholder="Новый пароль"
-        value={newPassword}
-        onChange={(e) => setNewPassword(e.target.value)}
-        className="form-input"
-      />
-      <div className="auth-buttons">
-        <button onClick={onResetPassword} disabled={resetLoading} className="btn-primary">
-          {resetLoading ? 'Сброс...' : 'Сбросить пароль'}
-        </button>
-        <button onClick={onBack} className="btn-secondary">Назад</button>
-      </div>
+    <input
+      type="email"
+      placeholder="Email"
+      value={resetEmail}
+      onChange={(e) => setResetEmail(e.target.value)}
+      className="form-input"
+      autoComplete="email"
+    />
+
+    <input
+      type="text"
+      placeholder="Verification code"
+      value={resetCode}
+      onChange={(e) => setResetCode(e.target.value)}
+      className="form-input"
+      inputMode="numeric"
+    />
+
+    <div className="code-hint">
+      {resetTTL > 0 ? `Code expires in ${resetTTL}s` : 'Code expired — request a new one from previous screen.'}
     </div>
-  );
-};
 
-// Компонент файлов
-const FileList = ({ files, shareLinks, onCreateShareLink, shareSettings }) => (
+    <input
+      type="password"
+      placeholder="New password"
+      value={newPassword}
+      onChange={(e) => setNewPassword(e.target.value)}
+      className="form-input"
+      autoComplete="new-password"
+    />
+
+    <div className="auth-buttons">
+      <button
+        onClick={onResetPassword}
+        disabled={resetLoading || resetTTL <= 0 || !resetEmail.trim() || !resetCode.trim() || !newPassword}
+        className="btn-primary"
+        type="button"
+      >
+        {resetLoading ? 'Resetting...' : 'Reset password'}
+      </button>
+      <button onClick={onBack} className="btn-secondary" type="button">Back</button>
+    </div>
+  </div>
+);
+
+
+const FileList = ({ files, shareLinks, onCreateShareLink, shareSettings, onDeleteFile, deletingId }) => (
   <div className="file-list">
     <h2>Your Files</h2>
     {files.length === 0 ? (
-      <p className="no-files">Пока нет файлов — загрузите первый.</p>
+      <p className="no-files">No files yet — upload your first one.</p>
     ) : (
       <table className="files-table">
         <thead>
           <tr>
-            <th>Имя</th>
-            <th>Размер</th>
-            <th>Ссылка</th>
+            <th>Name</th>
+            <th>Size</th>
+            <th>Link</th>
           </tr>
         </thead>
         <tbody>
@@ -215,18 +235,24 @@ const FileList = ({ files, shareLinks, onCreateShareLink, shareSettings }) => (
               <td>
                 {shareLinks[f.id] ? (
                   <div className="share-link">
-                    <a href={shareLinks[f.id]} target="_blank" rel="noopener noreferrer">Открыть</a>
-                    <button onClick={() => onCreateShareLink(f.id, shareSettings)}>
-                      Копировать
+                    <a href={shareLinks[f.id]} target="_blank" rel="noopener noreferrer">Open</a>
+                    <CopyButton text={shareLinks[f.id]} />
+                    <button onClick={() => onDeleteFile(f.id)} disabled={deletingId === f.id} className="btn-secondary">
+                      {deletingId === f.id ? 'Deleting...' : 'Delete'}
                     </button>
                   </div>
                 ) : (
-                  <button
-                    onClick={() => onCreateShareLink(f.id, shareSettings)}
-                    className="btn-primary"
-                  >
-                    Поделиться
-                  </button>
+                  <div className="share-link">
+                    <button
+                      onClick={() => onCreateShareLink(f.id, shareSettings)}
+                      className="btn-primary"
+                    >
+                      Share
+                    </button>
+                    <button onClick={() => onDeleteFile(f.id)} disabled={deletingId === f.id} className="btn-secondary">
+                      {deletingId === f.id ? 'Deleting...' : 'Delete'}
+                    </button>
+                  </div>
                 )}
               </td>
             </tr>
@@ -237,21 +263,24 @@ const FileList = ({ files, shareLinks, onCreateShareLink, shareSettings }) => (
   </div>
 );
 
-// Главный компонент
 function App() {
   const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    setOnUnauthorized(() => () => {
+      localStorage.removeItem('token');
+      setUser(null);
+      setAuthMode('login');
+    });
+  }, []);
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [files, setFiles] = useState([]);
-  const [search, setSearch] = useState('');
-  const [file, setFile] = useState(null);
-  const [shareLinks, setShareLinks] = useState({});
   const [authMode, setAuthMode] = useState('login');
   const [verificationCode, setVerificationCode] = useState('');
   const [userId, setUserId] = useState(null);
   const [authMessage, setAuthMessage] = useState('');
 
-  // Состояния для восстановления пароля
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [showResetPassword, setShowResetPassword] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
@@ -259,44 +288,52 @@ function App() {
   const [newPassword, setNewPassword] = useState('');
   const [resetLoading, setResetLoading] = useState(false);
 
-  // Состояния для общего доступа к файлам
+  const [forgotCooldown, setForgotCooldown] = useState(0); 
+  const [resetTTL, setResetTTL] = useState(0);             
+
+  const [twoFaTTL, setTwoFaTTL] = useState(0);             
+  const [twoFaCooldown, setTwoFaCooldown] = useState(0);   
+
+  const [files, setFiles] = useState([]);
+  const [search, setSearch] = useState('');
+  const [selectedFiles, setSelectedFiles] = useState([]);
+  const [shareLinks, setShareLinks] = useState({});
   const [expireDays, setExpireDays] = useState(7);
   const [maxViews, setMaxViews] = useState('');
   const [reuseExisting, setReuseExisting] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
 
-  // Состояния для поиска и фильтрации файлов в списке
   const [fileType, setFileType] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [totalFiles, setTotalFiles] = useState(0);
+  const [sortBy, setSortBy] = useState('created_at');
+  const [order, setOrder] = useState('desc');
   const [showFilters, setShowFilters] = useState(false);
 
-  // Проверка аутентификации при загрузке
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (token) {
       try {
         const payload = JSON.parse(atob(token.split('.')[1]));
         setUser({ email: payload.sub });
-      } catch (error) {
-        console.error('Invalid token', error);
+      } catch {
         localStorage.removeItem('token');
       }
     }
   }, []);
 
-  // Функции аутентификации
+
   const register = async () => {
     try {
       const response = await api.post('/register', { email, password });
-
       if (response.data.requires_verification) {
         setUserId(response.data.user_id);
         setAuthMode('verifyEmail');
-        setAuthMessage('Проверьте вашу почту для получения кода подтверждения');
+        setAuthMessage('Check your email for the verification code');
       } else {
         localStorage.setItem('token', response.data.access_token);
         setUser({ email });
@@ -308,11 +345,7 @@ function App() {
 
   const verifyEmail = async () => {
     try {
-      const response = await api.post('/verify-email', {
-        user_id: userId,
-        code: verificationCode
-      });
-
+      const response = await api.post('/verify-email', { user_id: userId, code: verificationCode });
       localStorage.setItem('token', response.data.access_token);
       setUser({ email });
       setAuthMode('login');
@@ -326,7 +359,6 @@ function App() {
       const formData = new URLSearchParams();
       formData.append('username', email);
       formData.append('password', password);
-
       const response = await api.post('/token', formData, {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
       });
@@ -337,27 +369,52 @@ function App() {
       } else if (response.status === 202) {
         setUserId(response.data.user_id);
         setAuthMode('verify2FA');
-        setAuthMessage('Проверьте вашу почту для получения кода двухфакторной аутентификации');
+        setAuthMessage('Check your email for the 2FA code');
+        setTwoFaTTL(60);
+        setTwoFaCooldown(60);
       }
     } catch (error) {
       alert('Login failed: ' + (error.response?.data?.detail || error.message));
     }
   };
 
-  const verify2FA = async () => {
+  const resend2FACode = async () => {
+    if (twoFaCooldown > 0) return;
     try {
-      const response = await api.post('/verify-2fa', {
-        user_id: userId,
-        code: verificationCode
+      const formData = new URLSearchParams();
+      formData.append('username', email);
+      formData.append('password', password);
+      const res = await api.post('/token', formData, {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
       });
-
-      localStorage.setItem('token', response.data.access_token);
-      setUser({ email });
-      setAuthMode('login');
-    } catch (error) {
-      alert('2FA verification failed: ' + (error.response?.data?.detail || error.message));
+      if (res.status === 202) {
+        setTwoFaTTL(60);
+        setTwoFaCooldown(60);
+        setAuthMessage('A new 2FA code was sent to your email.');
+      } else if (res.status === 200) {
+        localStorage.setItem('token', res.data.access_token);
+        setUser({ email });
+        setAuthMode('login');
+      }
+    } catch (e) {
+      alert('Failed to resend 2FA code: ' + (e.response?.data?.detail || e.message));
     }
   };
+
+  const verify2FA = async () => {
+    const code = (verificationCode || '').trim();
+    if (!code) { setAuthMessage('Enter the 2FA code from the email.'); return; }
+    try {
+      const res = await api.post('/verify-2fa', { user_id: userId, code });
+      localStorage.setItem('token', res.data.access_token);
+      setUser({ email });
+      setAuthMode('login');
+      setAuthMessage('');
+    } catch (err) {
+      setAuthMessage(err?.response?.data?.detail || '2FA verification failed. Check the code and try again.');
+    }
+  };
+
 
   const logout = () => {
     localStorage.removeItem('token');
@@ -365,22 +422,97 @@ function App() {
     setAuthMode('login');
   };
 
-  // Функции для работы с файлами
-  const uploadFile = async () => {
-    if (!file) return;
-
-    setUploading(true);
-    const formData = new FormData();
-    formData.append('file', file);
-
+  const handleForgotPasswordRequest = async () => {
+    if (!resetEmail.trim() || forgotCooldown > 0) return;
+    setResetLoading(true);
     try {
-      const response = await api.post(`/upload?expire_days=${expireDays}`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      });
-      setFiles([...files, response.data]);
+      await api.post('/forgot-password', { email: resetEmail });
+      setAuthMessage('If the email is registered, a reset code has been sent.');
+      setForgotCooldown(60);
+      setResetTTL(60);
+      setShowForgotPassword(false);
+      setShowResetPassword(true);
+    } catch (error) {
+      setAuthMessage('Error requesting password reset: ' + (error.response?.data?.detail || error.message));
+    }
+    setResetLoading(false);
+  };
 
-      // Сразу создать ссылку с текущими настройками
-      await createShareLink(response.data.id, { expireDays, maxViews, reuseExisting });
+  const handleResetPassword = async () => {
+    if (!resetEmail.trim() || !resetCode.trim() || !newPassword) return;
+    setResetLoading(true);
+    try {
+      await api.post('/reset-password', {
+        email: resetEmail,
+        code: resetCode,
+        new_password: newPassword
+      });
+      setAuthMessage('Password changed successfully. You can now sign in with your new password.');
+      setShowResetPassword(false);
+      setAuthMode('login');
+      setResetEmail('');
+      setResetCode('');
+      setNewPassword('');
+      setResetTTL(0);
+    } catch (error) {
+      setAuthMessage('Error resetting password: ' + (error.response?.data?.detail || error.message));
+    }
+    setResetLoading(false);
+  };
+
+  const backToLoginFromReset = () => {
+    setShowForgotPassword(false);
+    setShowResetPassword(false);
+    setResetEmail('');
+    setResetCode('');
+    setNewPassword('');
+    setForgotCooldown(0);
+    setResetTTL(0);
+  };
+
+  const deleteFile = async (fileId) => {
+    try {
+      setDeletingId(fileId);
+      const attempts = [
+        () => api.delete(`/files/${fileId}`),
+        () => api.delete(`/file/${fileId}`),
+        () => api.delete(`/files`, { params: { id: fileId } }),
+        () => api.post(`/files/${fileId}/delete`),
+      ];
+      let lastError = null;
+      for (const attempt of attempts) {
+        try {
+          await attempt();
+          setFiles((prev) => prev.filter((f) => f.id !== fileId));
+          setShareLinks((prev) => { const n = { ...prev }; delete n[fileId]; return n; });
+          return;
+        } catch (e) {
+          lastError = e;
+          const s = e?.response?.status;
+          if (s === 404 || s === 405) continue;
+          break;
+        }
+      }
+      throw lastError || new Error('Failed to delete file');
+    } catch (e) {
+      alert('Delete failed: ' + (e.response?.data?.detail || e.message));
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const uploadFile = async () => {
+    if (!selectedFiles || selectedFiles.length === 0) return;
+    setUploading(true);
+    try {
+      for (const f of selectedFiles) {
+        const formData = new FormData();
+        formData.append('file', f);
+        const response = await api.post(`/upload?expire_days=${expireDays}`, formData);
+        await createShareLink(response.data.id, { expireDays, maxViews, reuseExisting });
+      }
+      setSelectedFiles([]);
+      await fetchFiles();
     } catch (error) {
       alert('Upload failed: ' + (error.response?.data?.detail || error.message));
     } finally {
@@ -390,32 +522,13 @@ function App() {
 
   const createShareLink = async (fileId, settings) => {
     try {
-      // Строим query string с параметрами
-      const params = new URLSearchParams();
-      params.set('file_id', fileId);
-      params.set('expire_days', settings.expireDays);
-
-      if (settings.maxViews) {
-        params.set('max_views', settings.maxViews);
-      }
-
-      params.set('reuse', settings.reuseExisting.toString());
-
-      const response = await api.post(`/share-links/ensure?${params.toString()}`);
-      const shareUrl = response.data.share_url;
-
-      setShareLinks({
-        ...shareLinks,
-        [fileId]: shareUrl
-      });
-
-      return shareUrl;
-    } catch (error) {
-      alert('Failed to create share link: ' + (error.response?.data?.detail || error.message));
-      return null;
+      const url = await ensureShareLink(fileId, settings);
+      setShareLinks(prev => ({ ...prev, [fileId]: url }));
+      return url;
+    } catch (e) {
+      alert('Failed to create share link: ' + (e.response?.data?.detail || e.message));
     }
   };
-
 
   const fetchFiles = async (signal = null) => {
     try {
@@ -425,109 +538,63 @@ function App() {
         file_type: fileType || undefined,
         start_date: startDate || undefined,
         end_date: endDate || undefined,
+        sort_by: sortBy,
+        order,
         skip: (currentPage - 1) * itemsPerPage,
         limit: itemsPerPage,
       };
-
-      // Убираем undefined параметры
       Object.keys(params).forEach(key => params[key] === undefined && delete params[key]);
-
-      console.log('Fetching files with params:', params);
-      const response = await api.get('/files', {
-        params,
-        ...config
-      });
-
+      const response = await api.get('/files', { params, ...config });
       setFiles(response.data.files);
       setTotalFiles(response.data.total);
     } catch (error) {
-      if (error.name === 'CanceledError') {
-        console.log('Request canceled');
-      } else {
-        console.error('Failed to fetch files', error);
-      }
+      if (error.name !== 'CanceledError') console.error('Failed to fetch files', error);
     }
   };
 
-
-  // Функции для восстановления пароля
-  const handleForgotPassword = async () => {
-    setResetLoading(true);
-    try {
-      await api.post('/forgot-password', { email: resetEmail });
-      setAuthMessage('Если email зарегистрирован, вы получите код сброса');
-      setShowForgotPassword(false);
-      setShowResetPassword(true);
-    } catch (error) {
-      setAuthMessage('Ошибка при запросе сброса пароля: ' + (error.response?.data?.detail || error.message));
-    }
-    setResetLoading(false);
-  };
-
-  const handleResetPassword = async () => {
-    setResetLoading(true);
-    try {
-      await api.post('/reset-password', {
-        email: resetEmail,
-        code: resetCode,
-        new_password: newPassword
-      });
-      setAuthMessage('Пароль успешно изменен. Теперь вы можете войти с новым паролем.');
-      setShowResetPassword(false);
-      setAuthMode('login');
-      setResetEmail('');
-      setResetCode('');
-      setNewPassword('');
-    } catch (error) {
-      setAuthMessage('Ошибка при сбросе пароля: ' + (error.response?.data?.detail || error.message));
-    }
-    setResetLoading(false);
-  };
-
-  const handleBackToLogin = () => {
-    setShowForgotPassword(false);
-    setShowResetPassword(false);
-    setResetEmail('');
-    setResetCode('');
-    setNewPassword('');
-  };
-
-  // Функция для сброса фильтров
   const resetFilters = () => {
     setSearch('');
     setFileType('');
     setStartDate('');
     setEndDate('');
     setCurrentPage(1);
+    setSortBy('created_at');
+    setOrder('desc');
+    setItemsPerPage(10);
   };
 
-  // AbortController для отмены предыдущих запросов
+  useEffect(() => { setCurrentPage(1); },
+    [search, fileType, startDate, endDate, itemsPerPage, sortBy, order]);
+
   useEffect(() => {
-    if (user) {
-      const controller = new AbortController();
+    if (!user) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => { fetchFiles(controller.signal); }, 300);
+    return () => { controller.abort(); clearTimeout(timer); };
+  }, [user, search, fileType, startDate, endDate, currentPage, itemsPerPage, sortBy, order]);
 
-      // Добавляем задержку для поиска, чтобы избежать слишком частых запросов
-      const timer = setTimeout(() => {
-        fetchFiles(controller.signal);
-      }, 300); // Задержка 300 мс
+  useEffect(() => {
+    if (!forgotCooldown && !resetTTL && !twoFaTTL && !twoFaCooldown) return;
+    const id = setInterval(() => {
+      setForgotCooldown(s => (s > 0 ? s - 1 : 0));
+      setResetTTL(s => (s > 0 ? s - 1 : 0));
+      setTwoFaTTL(s => (s > 0 ? s - 1 : 0));
+      setTwoFaCooldown(s => (s > 0 ? s - 1 : 0));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [forgotCooldown, resetTTL, twoFaTTL, twoFaCooldown]);
 
-      return () => {
-        controller.abort();
-        clearTimeout(timer);
-      };
-    }
-  }, [user, search, fileType, startDate, endDate, currentPage, itemsPerPage]);
 
-  // Рендеринг форм аутентификации
   const renderAuthForm = () => {
     if (showForgotPassword) {
       return (
         <ForgotPasswordForm
           resetEmail={resetEmail}
           setResetEmail={setResetEmail}
-          onResetRequest={handleForgotPassword}
-          onBackToLogin={handleBackToLogin}
+          onResetRequest={handleForgotPasswordRequest}
+          onBackToLogin={backToLoginFromReset}
           resetLoading={resetLoading}
+          forgotCooldown={forgotCooldown}
         />
       );
     }
@@ -542,11 +609,9 @@ function App() {
           newPassword={newPassword}
           setNewPassword={setNewPassword}
           onResetPassword={handleResetPassword}
-          onBack={() => {
-            setShowResetPassword(false);
-            setShowForgotPassword(true);
-          }}
+          onBack={() => { setShowResetPassword(false); setShowForgotPassword(true); }}
           resetLoading={resetLoading}
+          resetTTL={resetTTL}
         />
       );
     }
@@ -567,7 +632,7 @@ function App() {
       case 'verifyEmail':
         return (
           <VerificationForm
-            title="Подтверждение Email"
+            title="Email verification"
             message={authMessage}
             verificationCode={verificationCode}
             setVerificationCode={setVerificationCode}
@@ -579,21 +644,68 @@ function App() {
       case 'verify2FA':
         return (
           <div className="auth-form">
-            <h2>Двухфакторная аутентификация</h2>
-            <p>{authMessage}</p>
+            <h2>Two-factor authentication</h2>
+            <p>{authMessage || 'Check your email for the 2FA code'}</p>
+
             <input
               type="text"
-              placeholder="Код подтверждения"
+              placeholder="Verification code"
               value={verificationCode}
               onChange={(e) => setVerificationCode(e.target.value)}
               className="form-input"
+              inputMode="numeric"
+              autoComplete="one-time-code"
             />
+
+            {/* TTL и кулдаун */}
+            <div className="code-hint">
+              {twoFaTTL > 0 ? `` : 'Code expired — request a new one.'}
+            </div>
+
             <div className="auth-buttons">
-              <button onClick={verify2FA} className="btn-primary">Подтвердить</button>
-              <button onClick={() => setAuthMode('login')} className="btn-secondary">Назад к входу</button>
+              <button
+                onClick={verify2FA}
+                className="btn-primary"
+                disabled={!verificationCode.trim()}
+              >
+                Verify
+              </button>
+
+              <button
+                onClick={async () => {
+                  try {
+                    const fd = new URLSearchParams();
+                    fd.append('username', email);
+                    fd.append('password', password);
+                    const r = await api.post('/token', fd, {
+                      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+                    });
+                    if (r.status === 202) {
+                      setTwoFaTTL(60);
+                      setTwoFaCooldown(60);
+                      setAuthMessage('New 2FA code sent to your email.');
+                    }
+                  } catch (e) {
+                    setAuthMessage(e?.response?.data?.detail || e.message);
+                  }
+                }}
+                className="btn-secondary"
+                disabled={twoFaCooldown > 0}
+                title={twoFaCooldown > 0 ? `Resend in ${twoFaCooldown}s` : 'Resend code'}
+              >
+                {twoFaCooldown > 0 ? `Resend in ${twoFaCooldown}s` : 'Resend code'}
+              </button>
+
+              <button
+                onClick={() => setAuthMode('login')}
+                className="btn-secondary"
+              >
+                Back
+              </button>
             </div>
           </div>
         );
+
 
       default:
         return (
@@ -622,11 +734,14 @@ function App() {
   return (
     <Router>
       <div className="container">
+        <div className="header">
+          <div className="brand"><span className="brand-badge"></span> SecureShare</div>
+        </div>
         <header>
           <h1>SecureShare</h1>
           <nav>
             <Link to="/">Files</Link>
-            <Link to="/settings/security">Security Settings</Link>
+            <Link to="/settings/security">Security</Link>
           </nav>
           <button onClick={logout} className="btn-secondary">Logout</button>
         </header>
@@ -635,10 +750,10 @@ function App() {
           <Route path="/" element={
             <>
               <div className="sharing-settings">
-                <h3>Настройки общего доступа</h3>
+                <h3>Sharing settings</h3>
                 <div className="settings-grid">
                   <div className="setting-group">
-                    <label>Срок действия (дней)</label>
+                    <label>Expiration (days)</label>
                     <input
                       type="number"
                       min="1"
@@ -650,26 +765,15 @@ function App() {
                   </div>
 
                   <div className="setting-group">
-                    <label>Лимит скачиваний</label>
+                    <label>Download limit</label>
                     <input
                       type="number"
                       min="1"
-                      placeholder="Без лимита"
+                      placeholder="By default one"
                       value={maxViews}
                       onChange={(e) => setMaxViews(e.target.value)}
                       className="form-input"
                     />
-                  </div>
-
-                  <div className="setting-group">
-                    <label className="checkbox-label">
-                      <input
-                        type="checkbox"
-                        checked={reuseExisting}
-                        onChange={(e) => setReuseExisting(e.target.checked)}
-                      />
-                      Переиспользовать существующие ссылки
-                    </label>
                   </div>
                 </div>
               </div>
@@ -680,7 +784,7 @@ function App() {
                     type="text"
                     placeholder="Search files by name"
                     value={search}
-                    onChange={(e) => setSearch(e.target.value)}
+                    onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }}
                     className="form-input"
                   />
                   <button
@@ -731,7 +835,7 @@ function App() {
                       <label>Items per page</label>
                       <select
                         value={itemsPerPage}
-                        onChange={(e) => setItemsPerPage(Number(e.target.value))}
+                        onChange={(e) => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }}
                         className="form-input"
                       >
                         <option value={10}>10</option>
@@ -742,48 +846,23 @@ function App() {
                     </div>
                   </div>
                 )}
-
-                {/* Пагинация */}
-                {totalFiles > 0 && (
-                  <div className="pagination">
-                    <button
-                      onClick={() => setCurrentPage(currentPage - 1)}
-                      disabled={currentPage === 1}
-                      className="btn-secondary"
-                    >
-                      Previous
-                    </button>
-
-                    <span className="page-info">
-                      Page {currentPage} of {Math.ceil(totalFiles / itemsPerPage)}
-                    </span>
-
-                    <button
-                      onClick={() => setCurrentPage(currentPage + 1)}
-                      disabled={currentPage >= Math.ceil(totalFiles / itemsPerPage)}
-                      className="btn-secondary"
-                    >
-                      Next
-                    </button>
-
-                    <span className="total-info">
-                      Total files: {totalFiles}
-                    </span>
-                  </div>
-                )}
               </div>
 
-              <div className="upload-section">
+              <div className="upload-section card">
                 <label className="btn-primary">
-                  {uploading ? 'Загрузка...' : 'Загрузить файл'}
+                  {uploading ? 'Uploading...' : 'Select files'}
                   <input
                     type="file"
-                    onChange={(e) => setFile(e.target.files[0])}
+                    multiple
+                    onChange={(e) => setSelectedFiles(Array.from(e.target.files || []))}
                     style={{ display: 'none' }}
                   />
                 </label>
+                {selectedFiles && selectedFiles.length > 0 && (
+                  <div className="selected-files-hint">{`${selectedFiles.length} file(s) selected`}</div>
+                )}
                 <button onClick={uploadFile} disabled={uploading} className="btn-primary">
-                  Upload
+                  Upload selected
                 </button>
               </div>
 
@@ -792,7 +871,51 @@ function App() {
                 shareLinks={shareLinks}
                 onCreateShareLink={createShareLink}
                 shareSettings={{ expireDays, maxViews, reuseExisting }}
+                onDeleteFile={deleteFile}
+                deletingId={deletingId}
               />
+
+              {totalFiles > 0 && (
+                <div className="pagination-footer">
+                  <button
+                    onClick={() => setCurrentPage(1)}
+                    disabled={currentPage === 1}
+                    className="btn-secondary"
+                  >
+                    First
+                  </button>
+
+                  <button
+                    onClick={() => setCurrentPage(currentPage - 1)}
+                    disabled={currentPage === 1}
+                    className="btn-secondary"
+                  >
+                    Previous
+                  </button>
+
+                  <span className="page-info">
+                    Page {currentPage} of {Math.ceil(totalFiles / itemsPerPage)}
+                  </span>
+
+                  <button
+                    onClick={() => setCurrentPage(currentPage + 1)}
+                    disabled={currentPage >= Math.ceil(totalFiles / itemsPerPage)}
+                    className="btn-secondary"
+                  >
+                    Next
+                  </button>
+
+                  <button
+                    onClick={() => setCurrentPage(Math.ceil(totalFiles / itemsPerPage))}
+                    disabled={currentPage >= Math.ceil(totalFiles / itemsPerPage)}
+                    className="btn-secondary"
+                  >
+                    Last
+                  </button>
+
+                  <span className="total-info">Total files: {totalFiles}</span>
+                </div>
+              )}
             </>
           } />
 
@@ -806,5 +929,3 @@ function App() {
 }
 
 export default App;
-
-я не буду вносить эти изменения, поскольку поиск файлов по имени и их фильтрация не происходят автоматически через useEffect и я прошу тебя выяснить почему.
