@@ -1,133 +1,136 @@
+from __future__ import annotations
+
 import os
 import uuid
 import tempfile
 import logging
-from fastapi import APIRouter, Depends, UploadFile, Request, BackgroundTasks, HTTPException, Query
+import secrets
+from datetime import datetime, timedelta
+from typing import Optional, List
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, UploadFile, Request, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
+from sqlalchemy import select, func, and_, or_
+from sqlalchemy.orm import aliased
+
 from app.core.database import get_db
+from app.core.config import settings
+from app.core.minio_client import minio_client
 from app.dependencies.auth import get_current_user
 from app.models.user import User
 from app.models.file import File
 from app.models.share_link import ShareLink
-from app.schemas.file import FileInfo, UploadResponse, ShareResponse
-from app.services.file_service import process_uploaded_file
-from app.core.minio_client import minio_client
-from app.core.config import settings
-from app.models.share_link import ShareLink
-from datetime import datetime, timedelta
+from app.schemas.file import FileInfo, UploadResponse, ShareResponse, FileListResponse
+from app.utils.urls import build_external_url
 
-router = APIRouter()
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("secure-share")
+
+router = APIRouter(tags=["Files"])
+
 
 @router.post("/upload", response_model=UploadResponse)
 async def upload_file(
-    background_tasks: BackgroundTasks,
     request: Request,
     file: UploadFile,
-    expire_days: int = 7,
+    expire_days: int = Query(7, ge=1, le=365),
+    create_share: bool = Query(False, description="Return share_url/token in UploadResponse"),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
 ):
-    # Генерация уникального ключа для файла
-    file_key = f"{uuid.uuid4()}_{file.filename}"
+    # 1) Сохраняем во временный файл, чтобы получить размер/стрим
+    suffix = ("_" + file.filename) if file.filename else ""
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            tmp.write(chunk)
+        temp_path = tmp.name
+
+    file_size = os.path.getsize(temp_path)
     content_type = file.content_type or "application/octet-stream"
-    
-    # Определение размера файла
-    file.file.seek(0, os.SEEK_END)
-    file_size = file.file.tell()
-    file.file.seek(0)
-    
-    # Создаем временный файл для обработки
+    object_name = f"{uuid.uuid4()}_{file.filename or 'upload.bin'}"
+
+    # 2) Грузим в MinIO
     try:
-        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-            content = await file.read()
-            temp_file.write(content)
-            temp_path = temp_file.name
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Failed to create temporary file: {str(e)}"
-        )
-    
-    # Загрузка в MinIO
-    try:
-        with open(temp_path, 'rb') as file_data:
+        with open(temp_path, "rb") as fp:
             minio_client.put_object(
-                settings.MINIO_BUCKET,
-                file_key,
-                file_data,
+                bucket_name=settings.MINIO_BUCKET,
+                object_name=object_name,
+                data=fp,
                 length=file_size,
-                content_type=content_type
+                content_type=content_type,
             )
     except Exception as e:
-        os.unlink(temp_path)  # Удаляем временный файл при ошибке
-        raise HTTPException(
-            status_code=500, 
-            detail=f"File upload failed: {str(e)}"
-        )
-    
-    # Явно генерируем UUID как строку
-    file_id = str(uuid.uuid4())
-    
-    # Сохранение метаданных в БД
+        try:
+            os.unlink(temp_path)
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"File upload failed: {e}")
+    finally:
+        try:
+            os.unlink(temp_path)
+        except Exception:
+            pass
+
+    # 3) Пишем метаданные в БД
     expires_at = datetime.utcnow() + timedelta(days=expire_days)
     db_file = File(
-        id=file_id,  # Используем строковый UUID
-        filename=file.filename,
+        filename=file.filename or "upload.bin",
         content_type=content_type,
         size=file_size,
         owner_id=current_user.id,
+        created_at=datetime.utcnow(),
+        expires_at=expires_at,
         bucket=settings.MINIO_BUCKET,
-        object_name=file_key,
-        expires_at=expires_at
+        object_name=object_name,
     )
-    
     db.add(db_file)
     await db.commit()
     await db.refresh(db_file)
-    
-    # Запуск фоновой задачи
-    if process_uploaded_file and callable(process_uploaded_file):
-        background_tasks.add_task(
-            process_uploaded_file,
-            tmp_path=temp_path,
-            user_id=str(current_user.id),
-            filename=file.filename,
-            expire_days=expire_days,
-            content_type=content_type
+
+    share_url: Optional[str] = None
+    token: Optional[str] = None
+
+    # 4) По запросу — сразу создаём шар-ссылку
+    if create_share:
+        token = secrets.token_urlsafe(24)
+        link = ShareLink(
+            file_id=str(db_file.id),
+            token=token,
+            expires_at=expires_at,
+            is_active=True,
         )
-    
-    # Формирование URL для скачивания
-    download_url = f"{request.base_url}download/{file_id}"
-    
+        db.add(link)
+        await db.commit()
+        await db.refresh(link)
+        share_url = build_external_url(request, f"/s/{token}")
+
+    # 5) Возвращаем UploadResponse (+share_url/token при необходимости)
     return UploadResponse(
-        id=file_id,  # Возвращаем строковый UUID
+        id=db_file.id,
         filename=db_file.filename,
         content_type=db_file.content_type,
         size=db_file.size,
-        download_url=download_url,
-        expires_at=db_file.expires_at
+        expires_at=db_file.expires_at,
+        share_url=share_url,
+        token=token,
     )
 
-@router.get("/file/{file_id}", response_model=FileInfo)
+
+@router.get("/files/{file_id}", response_model=FileInfo)
 async def get_file_info(
-    file_id: str,  # Изменено на string вместо UUID
+    file_id: UUID,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
 ):
-    # Поиск файла по строковому ID
-    result = await db.execute(select(File).where(File.id == file_id))
-    file = result.scalars().first()
-    
+    res = await db.execute(select(File).where(File.id == str(file_id)))
+    file = res.scalars().first()
     if not file:
-        logger.error(f"File not found: {file_id}")
         raise HTTPException(status_code=404, detail="File not found")
-    
-    if file.owner_id != current_user.id and not current_user.is_admin:
-        logger.warning(f"Access denied for user {current_user.id} to file {file_id}")
+    if file.owner_id != current_user.id and not getattr(current_user, "is_admin", False):
         raise HTTPException(status_code=403, detail="Access denied")
-    
     return FileInfo(
         id=file.id,
         filename=file.filename,
@@ -135,147 +138,67 @@ async def get_file_info(
         size=file.size,
         created_at=file.created_at,
         expires_at=file.expires_at,
-        download_url=f"/download/{file.id}"
     )
 
-@router.get("/files", response_model=list[FileInfo])
+
+@router.get("/files", response_model=FileListResponse)
 async def list_files(
-    current_user: User = Depends(get_current_user),
+    search: Optional[str] = Query(None, description="Search by filename"),
+    file_type: Optional[str] = Query(None, description="Filter by file extension (e.g., 'pdf', 'jpg')"),
+    start_date: Optional[str] = Query(None, description="Filter by creation date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="Filter by creation date (YYYY-MM-DD)"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    search: str = Query(None)
+    current_user: User = Depends(get_current_user),
 ):
+    # Базовый запрос для файлов пользователя
     query = select(File).where(File.owner_id == current_user.id)
     
-    if search:
-        query = query.where(File.filename.contains(search))
+    # Поиск по имени файла
+    if search and search.strip():
+        query = query.where(File.filename.ilike(f"%{search.strip()}%"))
     
-    result = await db.execute(query)
-    files = result.scalars().all()
+    # Фильтр по типу файла (расширению)
+    if file_type:
+        # Добавляем точку к расширению, если её нет
+        if not file_type.startswith('.'):
+            file_type = f".{file_type}"
+        query = query.where(File.filename.ilike(f"%{file_type}"))
     
-    return [
-        FileInfo(
-            id=file.id,
-            filename=file.filename,
-            content_type=file.content_type,
-            size=file.size,
-            created_at=file.created_at,
-            expires_at=file.expires_at,
-            download_url=f"/download/{file.id}"
-        )
-        for file in files
-    ]
-
-@router.post("/files/{file_id}/share", response_model=ShareResponse)
-async def share_file(
-    request: Request,
-    file_id: str,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    logger.info(f"Sharing file: {file_id}")
+    # Фильтр по дате создания
+    if start_date:
+        try:
+            start_datetime = datetime.strptime(start_date, "%Y-%m-%d")
+            query = query.where(File.created_at >= start_datetime)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid start_date format. Use YYYY-MM-DD.")
     
-    # Ищем файл по ID
-    result = await db.execute(select(File).where(File.id == file_id))
-    file = result.scalars().first()
+    if end_date:
+        try:
+            end_datetime = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+            query = query.where(File.created_at < end_datetime)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid end_date format. Use YYYY-MM-DD.")
     
-    if not file:
-        logger.error(f"File not found: {file_id}")
-        raise HTTPException(status_code=404, detail="File not found")
+    # Получаем общее количество файлов (до пагинации)
+    count_query = select(func.count()).select_from(query.subquery())
+    total_count = (await db.execute(count_query)).scalar()
     
-    # Проверяем права доступа
-    if file.owner_id != current_user.id and not current_user.is_admin:
-        logger.warning(f"Access denied for user {current_user.id} to file {file_id}")
-        raise HTTPException(status_code=403, detail="Access denied")
+    # Добавляем сортировку и пагинацию
+    query = query.order_by(File.created_at.desc()).offset(skip).limit(limit)
     
-    # Генерируем уникальный токен для доступа
-    share_token = str(uuid.uuid4())
+    # Выполняем запрос
+    res = await db.execute(query)
+    rows = res.scalars().all()
     
-    # Создаем запись в БД
-    expires_at = datetime.utcnow() + timedelta(days=7)
-    new_share_link = ShareLink(
-        token=share_token,
-        file_id=file_id,
-        expires_at=expires_at,
-        max_views=5,  # Пример: разрешаем 5 скачиваний
-        is_active=True
+    # Формирование ответа
+    files = [FileInfo.from_orm(f) for f in rows]
+    total_count = await get_total_count(db, current_user.id, search, file_type, start_date, end_date)
+    
+    return FileListResponse(
+        files=files,
+        total=total_count,
+        skip=skip,
+        limit=limit
     )
-    
-    await db.refresh(new_share_link)
-    
-    # Формируем URL для общего доступа
-    share_url = f"{request.base_url}download/{share_token}"
-    
-    logger.info(f"Share URL created for file {file_id}: {share_url}")
-    return ShareResponse(
-        share_url=share_url,
-        token=share_token,
-        expires_at=expires_at
-    )
-
-@router.get("/download/{token}")
-async def download_shared_file(
-    token: str,
-    db: AsyncSession = Depends(get_db)
-):
-    # Ищем активную ссылку
-    result = await db.execute(
-        select(ShareLink)
-        .where(ShareLink.token == token)
-        .where(ShareLink.is_active == True)
-    )
-    share_link = result.scalars().first()
-    
-    if not share_link:
-        raise HTTPException(status_code=404, detail="Link not found")
-    
-    # Проверяем срок действия
-    if share_link.expires_at < datetime.utcnow():
-        share_link.is_active = False
-        db.add(share_link)
-        await db.commit()
-        raise HTTPException(status_code=410, detail="Link expired")
-    
-    # Проверяем лимит скачиваний
-    if share_link.views >= share_link.max_views:
-        share_link.is_active = False
-        db.add(share_link)
-        await db.commit()
-        raise HTTPException(status_code=410, detail="Download limit reached")
-    
-    # Ищем файл
-    result = await db.execute(select(File).where(File.id == share_link.file_id))
-    file = result.scalars().first()
-    
-    if not file:
-        raise HTTPException(status_code=404, detail="File not found")
-    
-    # Увеличиваем счетчик просмотров
-    share_link.views += 1
-    if share_link.views >= share_link.max_views:
-        share_link.is_active = False
-    
-    db.add(share_link)
-    await db.commit()
-    
-    # Скачиваем файл из MinIO
-    try:
-        response = minio_client.get_object(
-            file.bucket,
-            file.object_name
-        )
-        
-        return StreamingResponse(
-            response.stream(32*1024),
-            media_type=file.content_type,
-            headers={
-                "Content-Disposition": f"attachment; filename={file.filename}"
-            }
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"File download failed: {str(e)}"
-        )
-    finally:
-        response.close()
-        response.release_conn()

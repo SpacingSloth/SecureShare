@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from app.core.database import Base, engine, SessionLocal
 from app.core.minio_client import initialize_minio_bucket
-from app.routes import auth, files, share_links, users, admin, download
+from app.routes import auth, files, share_links, users, admin, download, two_factor, ui
 from app.tasks.cleanup import start_cleanup_task
 from app.monitoring.setup import setup_monitoring
 from app.models import file, share_link, user
@@ -72,6 +72,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],  # Разрешает все методы
     allow_headers=["*"],  # Разрешает все заголовки
+    expose_headers=["Content-Disposition", "Content-Length"],
 )
 
 # Подключение маршрутов
@@ -80,6 +81,9 @@ app.include_router(files)
 app.include_router(share_links)
 app.include_router(users)
 app.include_router(admin)
+app.include_router(two_factor)
+app.include_router(download)
+app.include_router(ui)
 
 # Настройка мониторинга
 setup_monitoring(app)
