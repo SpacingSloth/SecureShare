@@ -1,28 +1,32 @@
+from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime
-from typing import Optional
+from uuid import UUID
 
-class FileBase(BaseModel):
+class FileInfo(BaseModel):
+    id: UUID
     filename: str
-    content_type: str
+    content_type: str | None
     size: int
-
-class FileCreate(FileBase):
-    pass
-
-class FileInfo(FileBase):
-    id: str
     created_at: datetime
-    expires_at: Optional[datetime] = None
-    download_url: str
+    expires_at: datetime
 
-    class Config:
-        orm_mode = True
+class UploadResponse(BaseModel):
+    id: UUID
+    filename: str
+    content_type: str | None
+    size: int
+    expires_at: datetime
+    share_url: Optional[str] = None
+    token: Optional[str] = None
 
-class UploadResponse(FileBase):
-    id: str
-    download_url: str
-    expires_at: Optional[datetime] = None
+class FileListResponse(BaseModel):
+    files: List[FileInfo]
+    total: int
+    skip: int
+    limit: int
 
 class ShareResponse(BaseModel):
     share_url: str
+    token: str
+    expires_at: datetime

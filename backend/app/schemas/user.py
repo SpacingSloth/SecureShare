@@ -1,6 +1,7 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, constr
 from datetime import datetime
 from typing import Optional
+
 
 class UserCreate(BaseModel):
     email: EmailStr
@@ -9,6 +10,26 @@ class UserCreate(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str
+
+class EmailVerificationRequest(BaseModel):
+    user_id: str
+    code: str
+
+class TwoFactorVerification(BaseModel):
+    user_id: str
+    code: str
+
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: constr(min_length=8)
+
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+class PasswordResetConfirm(BaseModel):
+    email: EmailStr
+    code: str
+    new_password: constr(min_length=8)
 
 class UserResponse(BaseModel):
     id: str
